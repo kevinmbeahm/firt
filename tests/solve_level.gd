@@ -1,7 +1,8 @@
 extends SceneTree
 # Regression test: bots solve level 1 using real input actions:
-#   slide the sheet onto the island, fold its far strip up into a ramp (grab the
-#   edge, raise hands, step back), ride the sheet to the ledge, walk up the ramp.
+#   fold the sheet's far strip up into a ramp (grab the edge, raise hands, step
+#   back), ride the sheet out over the gap until the ramp's tip reaches over the
+#   ledge, then walk up the ramp (their weight tips it onto the ledge).
 # Run:   godot --headless -s tests/solve_level.gd
 # Shots: godot -s tests/solve_level.gd -- --shots=/some/dir   (needs a display)
 # Exits 0 on success, 1 on failure. Time is measured in physics frames.
@@ -62,24 +63,17 @@ func _process(_d: float) -> bool:
 	p1 = lvl.players[0]
 	p2 = lvl.players[1]
 	s = lvl.sheet
-	if pf() > 6000:
+	if pf() > 12000:
 		check(false, "timed out at step %d" % step)
 		quit(1)
 	match step:
 		0:
-			if pf() > 10:
-				p1.global_position = Vector3(-3, 0.3, 3)
-				p2.global_position = Vector3(-5, 0.3, -3)
+			if pf() > 30:
+				# P1 on the island just past the sheet's far edge (x=-3).
+				p1.global_position = Vector3(-2.4, 0.2, 0)
+				p2.global_position = Vector3(-16, 0.3, -2)
 				next()
-		1: # slide the sheet back onto the island
-			hold(["p1_sheet", "p1_down"], true)
-			if s.position.x <= -19.0 or waited(900):
-				hold(["p1_sheet", "p1_down"], false)
-				check(s.position.x <= -18.9, "sheet slid onto the island (x=%.1f)" % s.position.x)
-				next()
-		2: # stand on the island just past the sheet's far edge
-			p1.global_position = Vector3(-9.6, 0.2, 0)
-			p2.global_position = Vector3(-24, 0.3, -2)
+		1, 2:
 			next()
 		3:
 			if waited(20):
@@ -107,15 +101,15 @@ func _process(_d: float) -> bool:
 				check(s.facets.size() == 2, "one fold made 2 facets")
 				check(tilt > 15.0 and tilt < 40.0, "the strip stands up as a ramp (%.0f deg)" % tilt)
 				snap("4_ramp")
-				p1.global_position = Vector3(-24, 0.3, 2)
+				p1.global_position = Vector3(-16, 0.3, 2)
 				next()
-		7: # both ride the flat part while P1 slides the sheet to the ledge
-			if waited(20):
+		7: # both ride the flat part while P1 slides the sheet out over the gap
+			if waited(30):
 				hold(["p1_sheet", "p1_up"], true)
-				if s.position.x >= 5.4 or waited(900):
+				if s.position.x >= -1.9 or waited(1800):
 					hold(["p1_sheet", "p1_up"], false)
-					check(s.position.x >= 5.3, "sheet slid up to the ledge (x=%.1f)" % s.position.x)
-					check(p2.global_position.x > 0.0, "P2 rode along on the sheet")
+					check(s.position.x >= -2.0, "ramp tip slid out over the ledge (sheet x=%.1f)" % s.position.x)
+					check(p2.global_position.x > -11.0, "P2 rode along on the sheet")
 					next()
 		8:
 			snap("5_at_ledge")
@@ -123,15 +117,16 @@ func _process(_d: float) -> bool:
 				next()
 		9: # P1 walks up the ramp onto the ledge
 			hold(["p1_up"], true)
-			if p1.global_position.x >= 20.0 or waited(600):
+			if p1.global_position.x >= 12.0 or waited(900):
 				hold(["p1_up"], false)
-				check(p1.global_position.y > 2.5 and p1.global_position.x > 14.0, "P1 walked up the ramp onto the ledge")
+				check(p1.global_position.y > 2.0 and p1.global_position.x > 6.0, "P1 walked up the ramp onto the ledge")
 				next()
 		10:
 			hold(["p2_up"], true)
-			if p2.global_position.x >= 20.0 or waited(600):
+			if p2.global_position.x >= 12.0 or waited(900):
 				hold(["p2_up"], false)
-				check(p2.global_position.y > 2.5 and p2.global_position.x > 14.0, "P2 walked up the ramp onto the ledge")
+				check(p2.global_position.y > 2.0 and p2.global_position.x > 6.0, "P2 walked up the ramp onto the ledge")
+				check(s.global_position.y > -1.0, "the ramp held (supported by the island and the ledge)")
 				next()
 		11:
 			if waited(10):

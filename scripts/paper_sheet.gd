@@ -1,8 +1,10 @@
 class_name PaperSheet
-extends AnimatableBody3D
+extends RigidBody3D
 ## A giant sheet of thin paper in the world. Wraps a PaperModel facet list with
 ## rendering, collision and the interactive fold / flip / turn / slide controls.
-## It is an AnimatableBody3D, so anyone standing on it rides along when it moves.
+## It is a real rigid body: it has weight, rests on whatever holds it up, tips
+## and falls when it hangs too far over an edge, and carries anyone standing on
+## it. Its mass and centre of mass are recomputed from the paper after every fold.
 
 signal folded ## a fold was committed or undone
 
@@ -10,6 +12,9 @@ const FRONT_COLOR := Color(0.86, 0.83, 0.74)
 const BACK_COLOR := Color(0.45, 0.65, 0.95)
 const EDGE_COLOR := Color(0.4, 0.37, 0.33)
 const TWEEN_TIME := 0.4
+const AREAL_DENSITY := 0.6 ## kg per square metre of paper (it's giant paper)
+const SLIDE_ACCEL := 12.0
+const LOST_Y := -25.0 ## below this the sheet is lost in the void and respawns
 
 var paper_size := Vector2(18, 12)
 var facets: Array = [] ## Array[PaperModel.Facet]
@@ -28,10 +33,21 @@ var _shapes: Array = []
 var _tween_from := Transform3D.IDENTITY
 var _tween_to := Transform3D.IDENTITY
 var _tween_t := 1.0
+var _push_velocity = null ## horizontal velocity requested by a player this frame
+var _slide := Vector3.ZERO ## commanded slide velocity, ramps toward the request
+var spawn_transform := Transform3D.IDENTITY
+var _respawn := false
 
 
 func _init() -> void:
-	sync_to_physics = true
+	continuous_cd = true
+	linear_damp = 0.2
+	angular_damp = 1.0
+	center_of_mass_mode = RigidBody3D.CENTER_OF_MASS_MODE_CUSTOM
+	var pm := PhysicsMaterial.new()
+	pm.friction = 0.7
+	pm.bounce = 0.0
+	physics_material_override = pm
 	_material = StandardMaterial3D.new()
 	_material.vertex_color_use_as_albedo = true
 	_material.roughness = 0.95
@@ -74,6 +90,16 @@ func is_busy() -> bool:
 	return fold_owner != null or _tween_t < 1.0
 
 
+func _ready() -> void:
+	spawn_transform = global_transform
+
+
+## Slide the sheet: called every physics frame a player holds the sheet control.
+func push(velocity_xz: Vector3) -> void:
+	_push_velocity = velocity_xz
+	sleeping = false
+
+
 ## World "up" expressed in sheet-local space (the sheet may be flipped/turned).
 func up_local() -> Vector3:
 	return (global_basis.inverse() * Vector3.UP).normalized()
@@ -89,16 +115,20 @@ func begin_fold(owner) -> bool:
 
 
 ## g and t are sheet-local: the grabbed point and where the hands hold it now.
-func update_fold(facet: int, g: Vector3, t: Vector3) -> void:
+## `mode` is one of PaperModel's FOLD_* kinds.
+func update_fold(facet: int, g: Vector3, t: Vector3, mode: int = PaperModel.FOLD_NORMAL) -> void:
+	if mode != PaperModel.FOLD_NORMAL:
+		var n: Vector3 = facets[facet].normal()
+		t -= n * n.dot(t - g) # reverse folds are flat
 	var snapped := PaperModel.snap_target(facets, facet, g, t)
-	_preview = PaperModel.plan_fold(facets, facet, g, snapped, up_local())
+	_preview = PaperModel.plan_fold(facets, facet, g, snapped, up_local(), mode)
 	fold_status = "" if _preview.ok else _preview.reason
 	_build_mesh(_preview.facets if _preview.ok else facets)
 	_show_crease(_preview)
 
 
-func finish_fold(facet: int, g: Vector3, t: Vector3) -> bool:
-	update_fold(facet, g, t)
+func finish_fold(facet: int, g: Vector3, t: Vector3, mode: int = PaperModel.FOLD_NORMAL) -> bool:
+	update_fold(facet, g, t, mode)
 	var ok: bool = _preview.ok
 	if ok:
 		_history.append(PaperModel.clone_all(facets))
@@ -152,6 +182,8 @@ func _rotate_about_center(rot: Basis) -> void:
 	for p in _all_points():
 		low_after = minf(low_after, (target * p).y)
 	target.origin.y += low_before - low_after
+	freeze_mode = RigidBody3D.FREEZE_MODE_KINEMATIC
+	freeze = true
 	_tween_from = global_transform
 	_tween_to = target
 	_tween_t = 0.0
@@ -162,6 +194,31 @@ func _physics_process(delta: float) -> void:
 		_tween_t = minf(_tween_t + delta / TWEEN_TIME, 1.0)
 		var s := smoothstep(0.0, 1.0, _tween_t)
 		global_transform = _tween_from.interpolate_with(_tween_to, s)
+		if _tween_t >= 1.0:
+			freeze = false
+			linear_velocity = Vector3.ZERO
+			angular_velocity = Vector3.ZERO
+	elif global_position.y < LOST_Y:
+		_respawn = true
+		sleeping = false
+
+
+func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
+	if _respawn:
+		_respawn = false
+		state.transform = spawn_transform
+		state.linear_velocity = Vector3.ZERO
+		state.angular_velocity = Vector3.ZERO
+		return
+	var v := state.linear_velocity
+	if _push_velocity != null:
+		# Drive the slide directly (it overrides friction, riders and all) while
+		# gravity keeps acting on y, so a sheet pushed off an edge still falls.
+		_slide = _slide.move_toward(_push_velocity, SLIDE_ACCEL * state.step)
+		state.linear_velocity = Vector3(_slide.x, v.y, _slide.z)
+		_push_velocity = null
+	else:
+		_slide = Vector3(v.x, 0.0, v.z)
 
 
 ## Axis-aligned box of the paper relative to the sheet's position, in world axes.
@@ -210,7 +267,31 @@ func _refresh() -> void:
 	_offsets = PaperModel.stack_offsets(facets)
 	_build_mesh(facets)
 	_rebuild_collision()
+	_update_mass()
 	_crease.visible = false
+	sleeping = false
+
+
+## Mass from paper area; centre of mass from where the paper actually is now,
+## so a fold that moves paper past an edge can tip the sheet over.
+func _update_mass() -> void:
+	var total := 0.0
+	var com := Vector3.ZERO
+	var lo := Vector3(INF, INF, INF)
+	var hi := -lo
+	for i in facets.size():
+		var f: PaperModel.Facet = facets[i]
+		var area := absf(PaperGeometry.signed_area(f.pts))
+		total += area
+		com += (f.at(PaperGeometry.centroid(f.pts)) + _offsets[i]) * area
+		for p in f.pts:
+			var q: Vector3 = f.at(p) + _offsets[i]
+			lo = lo.min(q)
+			hi = hi.max(q)
+	mass = maxf(total * AREAL_DENSITY, 1.0)
+	center_of_mass = com / maxf(total, 0.001)
+	var e := (hi - lo).max(Vector3(0.1, 0.1, 0.1))
+	inertia = mass / 12.0 * Vector3(e.y * e.y + e.z * e.z, e.x * e.x + e.z * e.z, e.x * e.x + e.y * e.y)
 
 
 func _rebuild_collision() -> void:

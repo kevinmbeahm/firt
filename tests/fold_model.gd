@@ -33,9 +33,46 @@ func facet_at(fs: Array, p: Vector3, lowest := false) -> int:
 	return best
 
 
-func fold(fs: Array, g: Vector3, t: Vector3, lowest := false) -> Dictionary:
+func fold(fs: Array, g: Vector3, t: Vector3, lowest := false, mode := PaperModel.FOLD_NORMAL) -> Dictionary:
 	var gi := facet_at(fs, g, lowest)
-	return PaperModel.plan_fold(fs, gi, g, PaperModel.snap_target(fs, gi, g, t), Vector3.UP)
+	return PaperModel.plan_fold(fs, gi, g, PaperModel.snap_target(fs, gi, g, t), Vector3.UP, mode)
+
+
+func reverse_fold_tests() -> void:
+	# A 2 x 8 strip folded in half lengthwise: two layers joined along a spine at x=0.
+	var strip := PaperModel.make_sheet(Vector2(2, 8))
+	var r := fold(strip, Vector3(-1, T, 4), Vector3(1, T, 4))
+	check(r.ok and r.facets.size() == 2, "strip folded in half (spine along x=0)")
+	strip = r.facets
+	# Grab the spine's tip and carry it out sideways: crease from (0,-2) to (1,-3).
+	var g := Vector3(0, T, -4)
+	var t := Vector3(2, T, -2)
+	var plain := fold(strip, g, t)
+	var inside := fold(strip, g, t, false, PaperModel.FOLD_INSIDE_REVERSE)
+	var outside := fold(strip, g, t, false, PaperModel.FOLD_OUTSIDE_REVERSE)
+	check(plain.ok and inside.ok and outside.ok, "plain, inside-reverse and outside-reverse folds all plan (%s / %s)" % [inside.reason, outside.reason])
+	if not (inside.ok and outside.ok):
+		return
+	check(inside.facets.size() == 4 and outside.facets.size() == 4, "the crease splits both layers")
+	for f in inside.facets:
+		if absf(f.normal().y) < 0.99:
+			check(false, "reverse-folded paper lies flat")
+			return
+	# The tip pieces are the ones that moved out past x=1 (they point sideways now).
+	var moved_in: Array = []
+	var moved_out: Array = []
+	for f in inside.facets:
+		if f.at(PaperGeometry.centroid(f.pts)).x > 0.8:
+			moved_in.append(f.layer)
+	for f in outside.facets:
+		if f.at(PaperGeometry.centroid(f.pts)).x > 0.8:
+			moved_out.append(f.layer)
+	moved_in.sort()
+	moved_out.sort()
+	check(moved_in == [1, 2], "inside reverse: the tip tucks between the two layers (tip layers %s of 0..3)" % [moved_in])
+	check(moved_out == [0, 3], "outside reverse: the tip wraps around the outside (tip layers %s of 0..3)" % [moved_out])
+	var single := fold(PaperModel.make_sheet(Vector2(4, 4)), Vector3(2, T, 2), Vector3(0, T, 0), false, PaperModel.FOLD_INSIDE_REVERSE)
+	check(not single.ok, "reverse fold on a single layer is refused (%s)" % single.reason)
 
 
 func moved_normals(fs: Array, axis: Vector3) -> int:
@@ -88,4 +125,5 @@ func _init() -> void:
 		Vector3(9, T, 0), Vector3(8.4, 2.63, 0), Vector3.UP)
 	var tilt := rad_to_deg((ramp.facets[1] as PaperModel.Facet).normal().angle_to(Vector3.UP))
 	check(ramp.ok and absf(tilt - 25.7) < 1.0, "raised hands give a partial fold (ramp at %.1f deg)" % tilt)
+	reverse_fold_tests()
 	quit(0 if ok else 1)

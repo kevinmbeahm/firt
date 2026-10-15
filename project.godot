@@ -19,3 +19,7 @@ window/stretch/mode="canvas_items"
 [rendering]
 
 environment/defaults/default_clear_color=Color(0.09, 0.1, 0.14, 1)
+
+[physics]
+
+common/physics_ticks_per_second=120

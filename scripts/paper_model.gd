@@ -26,6 +26,12 @@ const CREASE_SNAP := 0.15
 const FLAT_SNAP := deg_to_rad(12.0)
 const RIGHT_SNAP := deg_to_rad(6.0)
 
+## Fold kinds. A reverse fold works on a folded edge (layers joined at a spine):
+## both sides of the tip swing about the same crease in opposite directions,
+## tucking it between the layers (inside) or wrapping it round them (outside).
+enum { FOLD_NORMAL, FOLD_INSIDE_REVERSE, FOLD_OUTSIDE_REVERSE }
+const FOLD_NAMES := ["fold", "inside reverse fold", "outside reverse fold"]
+
 
 class Facet:
 	var pts: PackedVector2Array ## convex polygon in paper space
@@ -126,12 +132,15 @@ static func snap_target(src: Array, gi: int, g: Vector3, t: Vector3) -> Vector3:
 ## Plans folding facet `gi` so its point `g` (sheet-local, on the facet) moves to
 ## `t`. The crease is where the paper must bend for g to land exactly on t: the
 ## line where the grabbed facet's plane meets the perpendicular bisector of g-t.
+## Reverse folds are always flat, so they only use t's in-plane position.
 ## Returns {ok, reason, facets, axis_a, axis_d, plane_n}.
-static func plan_fold(src: Array, gi: int, g: Vector3, t: Vector3, up: Vector3) -> Dictionary:
+static func plan_fold(src: Array, gi: int, g: Vector3, t: Vector3, up: Vector3, mode: int = FOLD_NORMAL) -> Dictionary:
 	var res := {"ok": false, "reason": "", "facets": [], "axis_a": g, "axis_d": Vector3.ZERO, "plane_n": Vector3.UP}
 	var gf: Facet = src[gi]
 	var n := gf.normal()
 	res.plane_n = n
+	if mode != FOLD_NORMAL:
+		t -= n * n.dot(t - g)
 	var dv := t - g
 	if dv.length() < MIN_DRAG:
 		res.reason = "drag further"
@@ -163,7 +172,7 @@ static func plan_fold(src: Array, gi: int, g: Vector3, t: Vector3, up: Vector3) 
 	var vg := g - foot
 	var vt := t - foot
 	var theta := atan2(axis.dot(vg.cross(vt)), vg.dot(vt))
-	theta = _snap_angle(theta, axis, vg, up)
+	theta = _snap_angle(theta, axis, vg, up) if mode == FOLD_NORMAL else PI
 	if absf(theta) < MIN_ANGLE:
 		res.reason = "lift or drag to fold"
 		return res
@@ -227,6 +236,9 @@ static func plan_fold(src: Array, gi: int, g: Vector3, t: Vector3, up: Vector3) 
 				if (off - axis * off.dot(axis)).length() > TEAR_TOL:
 					res.reason = "would tear the paper"
 					return res
+
+	if mode != FOLD_NORMAL:
+		return _finish_reverse(res, pieces, moving, a, axis, vg, canonical(n), mode == FOLD_INSIDE_REVERSE)
 
 	# Rotate the moving paper and give it a stacking order.
 	var rot := Basis(axis, theta)
@@ -292,6 +304,116 @@ static func _existing_crease(src: Array, gf: Facet, a: Vector3, axis: Vector3):
 static func _line_dist(p: Vector3, a: Vector3, d: Vector3) -> float:
 	var off := p - a
 	return (off - d * off.dot(d)).length()
+
+
+## Reverse folds: split the moving paper into its two sides (pieces joined only
+## through 180-degree folds such as the spine), then swing the upper side and
+## the lower side about the crease in opposite directions.
+static func _finish_reverse(res: Dictionary, pieces: Array, moving: Dictionary, a: Vector3,
+		axis: Vector3, vg: Vector3, cn: Vector3, inside: bool) -> Dictionary:
+	# Components of the moving paper that don't cross a flat-folded hinge.
+	var comp := {}
+	var comps: Array = []
+	for i in moving:
+		if comp.has(i):
+			continue
+		var members: Array = [i]
+		comp[i] = comps.size()
+		var queue: Array = [i]
+		while not queue.is_empty():
+			var cur: int = queue.pop_back()
+			var cf: Facet = pieces[cur].f
+			for j in moving:
+				if comp.has(j):
+					continue
+				var jf: Facet = pieces[j].f
+				if cf.normal().dot(jf.normal()) < -0.99:
+					continue
+				if not shared_edge(cf.pts, jf.pts).is_empty():
+					comp[j] = comps.size()
+					members.append(j)
+					queue.append(j)
+		comps.append(members)
+	if comps.size() < 2:
+		res.reason = "reverse folds need a folded edge (two joined layers)"
+		return res
+
+	# Upper side = components stacked above the middle of the moving paper.
+	var means: Array = []
+	for members in comps:
+		var total := 0.0
+		for i in members:
+			total += pieces[i].f.layer
+		means.append(total / members.size())
+	var mid: float = (means.min() + means.max()) * 0.5
+	var upper := {}
+	var lower := {}
+	for c in comps.size():
+		for i in comps[c]:
+			if means[c] > mid:
+				upper[i] = true
+			else:
+				lower[i] = true
+	if upper.is_empty() or lower.is_empty():
+		res.reason = "reverse folds need a folded edge (two joined layers)"
+		return res
+
+	var top := -1000000
+	var bottom := 1000000
+	for p in pieces:
+		top = maxi(top, p.f.layer)
+		bottom = mini(bottom, p.f.layer)
+	var umin := 1000000
+	var umax := -1000000
+	var lmin := 1000000
+	var lmax := -1000000
+	for i in upper:
+		umin = mini(umin, pieces[i].f.layer)
+		umax = maxi(umax, pieces[i].f.layer)
+	for i in lower:
+		lmin = mini(lmin, pieces[i].f.layer)
+		lmax = maxi(lmax, pieces[i].f.layer)
+
+	# Inside: upper side swings down and lower side up, both landing between
+	# the layers. Outside: upper over the top, lower round the bottom.
+	var spin_up := _flat_spin(a, axis, vg, cn, 1.0)
+	var spin_down := _flat_spin(a, axis, vg, cn, -1.0)
+	var keyed: Array = []
+	for i in pieces.size():
+		var f: Facet = pieces[i].f
+		var key := float(f.layer)
+		var xf := f.xf
+		if upper.has(i):
+			xf = (spin_down if inside else spin_up) * f.xf
+			if inside:
+				key = umin - 0.05 - 0.4 * (f.layer - umin) / (umax - umin + 1.0)
+			else:
+				key = top + 0.05 + 0.4 * (umax - f.layer) / (umax - umin + 1.0)
+		elif lower.has(i):
+			xf = (spin_up if inside else spin_down) * f.xf
+			if inside:
+				key = lmax + 0.05 + 0.4 * (lmax - f.layer) / (lmax - lmin + 1.0)
+			else:
+				key = bottom - 0.05 - 0.4 * (f.layer - lmin) / (lmax - lmin + 1.0)
+		keyed.append([key, Facet.new(f.pts, xf, 0)])
+	keyed.sort_custom(func(x: Array, y: Array) -> bool: return x[0] < y[0])
+	var out: Array = []
+	for i in keyed.size():
+		var f: Facet = keyed[i][1]
+		f.layer = i
+		f.xf = f.xf.orthonormalized()
+		out.append(f)
+	res.ok = true
+	res.facets = out
+	return res
+
+
+## A half turn about the crease that passes through the `side` (+1 = the
+## canonical-normal side) of the paper on its way over.
+static func _flat_spin(a: Vector3, axis: Vector3, vg: Vector3, cn: Vector3, side: float) -> Transform3D:
+	var s := 1.0 if cn.dot(Basis(axis, PI * 0.5) * vg) * side > 0.0 else -1.0
+	var rot := Basis(axis, s * PI)
+	return Transform3D(rot, a - rot * a)
 
 
 static func _snap_angle(theta: float, axis: Vector3, vg: Vector3, up: Vector3) -> float:

@@ -1,21 +1,20 @@
 class_name Level
 extends Node3D
-## Prototype level: a start island, a bottomless gap, and a ledge 2.6 m high
-## that you can't jump onto. A big sheet spans most of the gap. Fold part of it
-## up at an angle into a ramp, slide it against the ledge and walk up.
-## A second, smaller sheet on the island is a sandbox for free folding
-## (paper planes etc.). Both players must reach the flag.
+## Prototype level: a start island, a 7 m bottomless gap, and a ledge 2.2 m
+## high that you can't jump onto. The paper has real weight: slide a flat sheet
+## too far over the edge and it tips into the void. Fold part of the big sheet up
+## into a ramp, slide it out until the ramp's tip reaches over the ledge (so it's
+## held up at both ends) and walk up. A second, smaller sheet on the island is a
+## sandbox for free folding (paper planes, reverse folds...). Both players must
+## reach the flag.
 
 const PUZZLE_SIZE := Vector2(18, 12)
-const PUZZLE_START := Vector3(-1, 0, 0)
+const PUZZLE_START := Vector3(-12, 0, 0)
 const SANDBOX_SIZE := Vector2(6, 8.5)
-const SANDBOX_START := Vector3(-20, 0, 9.5)
-## Region (world XZ) every sheet must stay inside, so it can't be slid through
-## the ledge or lost in the void.
-const SHEET_LIMIT := Rect2(-38, -14, 51.9, 28)
-const GOAL_POS := Vector3(21, 2.6, 0)
+const SANDBOX_START := Vector3(-26, 0, 9.5)
+const GOAL_POS := Vector3(13, 2.2, 0)
 const GOAL_RADIUS := 3.5
-const GOAL_MIN_Y := 2.3
+const GOAL_MIN_Y := 1.9
 
 var sheet_speed := 3.0
 var sheet: PaperSheet ## the puzzle sheet
@@ -46,7 +45,7 @@ func _ready() -> void:
 		p.id = i + 1
 		p.color = colors[i]
 		p.level = self
-		p.spawn = Vector3(-24, 0.1, -2.0 + i * 4.0)
+		p.spawn = Vector3(-25, 0.1, -2.0 + i * 4.0)
 		add_child(p)
 		p.global_position = p.spawn
 		players.append(p)
@@ -120,9 +119,9 @@ func _build_environment() -> void:
 
 
 func _build_terrain() -> void:
-	# Start island (top at y=0) and the high ledge (top at y=2.6).
-	_add_block(Vector3(-20, -2, 0), Vector3(22, 4, 26), Color(0.45, 0.62, 0.45))
-	_add_block(Vector3(21, -1.7, 0), Vector3(14, 8.6, 16), Color(0.62, 0.5, 0.72))
+	# Start island (top at y=0, edge at x=-1) and the high ledge (x from 6, top at y=2.2).
+	_add_block(Vector3(-16, -2, 0), Vector3(30, 4, 26), Color(0.45, 0.62, 0.45))
+	_add_block(Vector3(13, -1.9, 0), Vector3(14, 8.2, 16), Color(0.62, 0.5, 0.72))
 
 	# Goal flag.
 	var pole := MeshInstance3D.new()
@@ -203,15 +202,6 @@ func sheet_near(p: Node3D) -> PaperSheet:
 	return best
 
 
-## Slides a sheet; anyone standing on it is carried by physics.
-func push_sheet(s: PaperSheet, v: Vector3) -> void:
-	var b := s.world_box()
-	var p := s.position + Vector3(v.x, 0.0, v.z)
-	p.x = clampf(p.x, SHEET_LIMIT.position.x - b.position.x, SHEET_LIMIT.end.x - b.end.x)
-	p.z = clampf(p.z, SHEET_LIMIT.position.y - b.position.z, SHEET_LIMIT.end.y - b.end.z)
-	s.position = p
-
-
 func undo() -> void:
 	while not _undo_order.is_empty():
 		var s: PaperSheet = _undo_order.pop_back()
@@ -275,9 +265,9 @@ func _update_camera(delta: float) -> void:
 
 
 func _update_hud() -> void:
-	var text := "P1: WASD move  Space jump  |  hold F/LMB on a glowing corner, walk to move it, Space/C or wheel raise/lower hands, release to crease\n"
+	var text := "P1: WASD move  Space jump  |  hold F/LMB on a glowing corner, walk to move it, Space/C or wheel raise/lower hands, Tab fold type, release to crease\n"
 	text += "      hold R/RMB: move = slide sheet, Space = flip it over, F/LMB = turn it\n"
-	text += "P2: Arrows  / jump  . grab  ; lower  , sheet     Pads: A jump/raise  B lower  X grab  RB sheet\n"
+	text += "P2: Arrows  / jump  . grab  ; lower  ' fold type  , sheet     Pads: A jump/raise  B lower  X grab  Y fold type  RB sheet\n"
 	text += "Mouse / right stick / Q E: camera   Z: undo fold   Backspace: restart   Esc: release mouse"
 	for p in players:
 		var st: String = p.fold_status()
@@ -295,9 +285,9 @@ func _setup_input() -> void:
 		return # already configured (scene reload)
 	var keys := {
 		1: {"left": KEY_A, "right": KEY_D, "up": KEY_W, "down": KEY_S,
-			"jump": KEY_SPACE, "lower": KEY_C, "grab": KEY_F, "sheet": KEY_R},
+			"jump": KEY_SPACE, "lower": KEY_C, "grab": KEY_F, "sheet": KEY_R, "mode": KEY_TAB},
 		2: {"left": KEY_LEFT, "right": KEY_RIGHT, "up": KEY_UP, "down": KEY_DOWN,
-			"jump": KEY_SLASH, "lower": KEY_SEMICOLON, "grab": KEY_PERIOD, "sheet": KEY_COMMA},
+			"jump": KEY_SLASH, "lower": KEY_SEMICOLON, "grab": KEY_PERIOD, "sheet": KEY_COMMA, "mode": KEY_APOSTROPHE},
 	}
 	for pid in [1, 2]:
 		var device: int = pid - 1
@@ -310,6 +300,7 @@ func _setup_input() -> void:
 		_add_button("p%d_jump" % pid, JOY_BUTTON_A, device)
 		_add_button("p%d_lower" % pid, JOY_BUTTON_B, device)
 		_add_button("p%d_grab" % pid, JOY_BUTTON_X, device)
+		_add_button("p%d_mode" % pid, JOY_BUTTON_Y, device)
 		_add_button("p%d_sheet" % pid, JOY_BUTTON_RIGHT_SHOULDER, device)
 		_add_axis("cam_left", JOY_AXIS_RIGHT_X, -1.0, device)
 		_add_axis("cam_right", JOY_AXIS_RIGHT_X, 1.0, device)

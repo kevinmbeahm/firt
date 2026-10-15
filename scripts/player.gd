@@ -14,6 +14,7 @@ const REACH := 2.4 ## from the chest to a grabbable corner/edge
 const DRAG_SPEED_MULT := 0.6
 const LIFT_SPEED := 1.6 ## how fast held paper is raised/lowered (m/s)
 const LIFT_RANGE := Vector2(-3.0, 3.2)
+const WEIGHT := 70.0 * 9.8 ## newtons pressed into paper you stand on
 const FALL_DEATH_Y := -14.0
 const ARM_LEN := 0.75
 const MAX_ARM_STRETCH := 2.6
@@ -32,6 +33,8 @@ var _grab_local := Vector3.ZERO ## grabbed point, sheet-local
 var _grab_start_player := Vector3.ZERO
 var _grab_start_sheet := Vector3.ZERO
 var _lift := 0.0 ## how far the hands are raised above where they grabbed
+var _fold_mode := PaperModel.FOLD_NORMAL
+var _floor_body: Object = null ## what we're standing on, from the last frame
 var _rig: Node3D
 var _arms: Array = []
 var _hands: Array = []
@@ -179,12 +182,16 @@ func _physics_process(delta: float) -> void:
 	if handling_sheet:
 		var s: PaperSheet = level.sheet_near(self)
 		if s != null and not s.is_busy():
-			level.push_sheet(s, wish * level.sheet_speed * delta)
+			s.push(wish * level.sheet_speed)
 			if Input.is_action_just_pressed(_a("jump")):
 				s.flip(level.camera_basis().x)
 			elif Input.is_action_just_pressed(_a("grab")):
 				s.turn(PI * 0.25)
-		wish = Vector3.ZERO
+		# Ride the sheet if you're on it, otherwise walk alongside as you push.
+		if s == null or _floor_body == s:
+			wish = Vector3.ZERO
+		else:
+			wish *= level.sheet_speed / SPEED
 
 	var speed := SPEED * (DRAG_SPEED_MULT if grabbing else 1.0)
 	var accel := GROUND_ACCEL if is_on_floor() else AIR_ACCEL
@@ -207,6 +214,7 @@ func _physics_process(delta: float) -> void:
 		velocity.y -= GRAVITY * delta
 
 	move_and_slide()
+	_press_on_paper()
 	_update_grab(handling_sheet)
 
 	if global_position.y < FALL_DEATH_Y:
@@ -216,6 +224,21 @@ func _physics_process(delta: float) -> void:
 func nudge_lift(amount: float) -> void:
 	if grabbing:
 		_lift = clampf(_lift + amount, LIFT_RANGE.x, LIFT_RANGE.y)
+
+
+## Your weight pushes down on paper you stand on, so stepping out onto an
+## overhang can tip a sheet over the edge.
+func _press_on_paper() -> void:
+	_floor_body = null
+	if not is_on_floor():
+		return
+	var from := global_position + Vector3.UP * 0.2
+	var q := PhysicsRayQueryParameters3D.create(from, from + Vector3.DOWN * 0.5, collision_mask, [get_rid()])
+	var hit := get_world_3d().direct_space_state.intersect_ray(q)
+	_floor_body = hit.get("collider")
+	var body := _floor_body as RigidBody3D
+	if body != null:
+		body.apply_force(Vector3.DOWN * WEIGHT, hit.position - body.global_position)
 
 
 ## Lets the bean climb a single paper layer by walking into it.
@@ -246,9 +269,11 @@ func _update_grab(handling_sheet: bool) -> void:
 	if grabbing:
 		var t := _grab_sheet.to_local(_hands_world())
 		if Input.is_action_pressed(_a("grab")):
-			_grab_sheet.update_fold(_grab_facet, _grab_local, t)
+			if Input.is_action_just_pressed(_a("mode")):
+				_fold_mode = (_fold_mode + 1) % PaperModel.FOLD_NAMES.size()
+			_grab_sheet.update_fold(_grab_facet, _grab_local, t, _fold_mode)
 		else:
-			_grab_sheet.finish_fold(_grab_facet, _grab_local, t)
+			_grab_sheet.finish_fold(_grab_facet, _grab_local, t, _fold_mode)
 			grabbing = false
 		return
 	hover = null
@@ -265,12 +290,13 @@ func _update_grab(handling_sheet: bool) -> void:
 			_grab_start_player = global_position
 			_grab_start_sheet = s.global_position
 			_lift = 0.0
+			_fold_mode = PaperModel.FOLD_NORMAL
 
 
 func fold_status() -> String:
 	if not grabbing:
 		return ""
-	var msg := "hands %+.1f m" % _lift
+	var msg := "%s, hands %+.1f m" % [PaperModel.FOLD_NAMES[_fold_mode], _lift]
 	if _grab_sheet.fold_status != "":
 		msg += "  (" + _grab_sheet.fold_status + ")"
 	return msg
