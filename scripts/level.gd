@@ -1,21 +1,25 @@
 class_name Level
 extends Node3D
-## Prototype level: a start island, a bottomless gap, and a ledge 2.6 m high.
-## One giant sheet of paper spans the gap. Fold it into a stack of three or more
-## layers, slide it up against the ledge with both players riding on it, and hop
-## across. Both players must reach the flag.
+## Prototype level: a start island, a bottomless gap, and a ledge 2.6 m high
+## that you can't jump onto. A big sheet spans most of the gap. Fold part of it
+## up at an angle into a ramp, slide it against the ledge and walk up.
+## A second, smaller sheet on the island is a sandbox for free folding
+## (paper planes etc.). Both players must reach the flag.
 
-const PAPER_SIZE := Vector2(18, 12)
-const SHEET_START := Vector3(-1, 0, 0)
-## Region (world XZ) the sheet's bounding box must stay inside, so it can't be
-## slid through the ledge or lost in the void.
-const SHEET_LIMIT := Rect2(-38, -14, 51.5, 28)
+const PUZZLE_SIZE := Vector2(18, 12)
+const PUZZLE_START := Vector3(-1, 0, 0)
+const SANDBOX_SIZE := Vector2(6, 8.5)
+const SANDBOX_START := Vector3(-20, 0, 9.5)
+## Region (world XZ) every sheet must stay inside, so it can't be slid through
+## the ledge or lost in the void.
+const SHEET_LIMIT := Rect2(-38, -14, 51.9, 28)
 const GOAL_POS := Vector3(21, 2.6, 0)
 const GOAL_RADIUS := 3.5
 const GOAL_MIN_Y := 2.3
 
 var sheet_speed := 3.0
-var sheet: PaperSheet
+var sheet: PaperSheet ## the puzzle sheet
+var sheets: Array = []
 var players: Array = []
 var complete := false
 
@@ -25,6 +29,7 @@ var _camera: Camera3D
 var _cam_focus := Vector3(-6, 1, 0)
 var _cam_dist := 16.0
 var _hud: Label
+var _undo_order: Array = [] ## sheets in the order they were folded
 
 
 func _ready() -> void:
@@ -32,11 +37,8 @@ func _ready() -> void:
 	_build_environment()
 	_build_terrain()
 
-	sheet = PaperSheet.new()
-	sheet.setup(PAPER_SIZE)
-	sheet.position = SHEET_START
-	add_child(sheet)
-	sheet.folded.connect(_lift_players)
+	sheet = _add_sheet(PUZZLE_SIZE, PUZZLE_START)
+	_add_sheet(SANDBOX_SIZE, SANDBOX_START).rotation.y = PI * 0.5
 
 	var colors := [Color(0.95, 0.4, 0.35), Color(0.35, 0.62, 0.95)]
 	for i in 2:
@@ -64,6 +66,16 @@ func _ready() -> void:
 	_hud.add_theme_constant_override("outline_size", 6)
 	layer.add_child(_hud)
 	_update_camera(1.0)
+
+
+func _add_sheet(size: Vector2, pos: Vector3) -> PaperSheet:
+	var s := PaperSheet.new()
+	s.setup(size)
+	s.position = pos
+	add_child(s)
+	s.folded.connect(func() -> void: _undo_order.append(s))
+	sheets.append(s)
+	return s
 
 
 # --- Scene construction ------------------------------------------------------
@@ -162,30 +174,55 @@ func camera_basis() -> Basis:
 	return Basis(Vector3.UP, cam_yaw)
 
 
-## Slides the whole (folded) sheet; anyone standing on it is carried by physics.
-func push_sheet(v: Vector3) -> void:
-	var b := sheet.local_bounds()
-	var p := sheet.position + Vector3(v.x, 0.0, v.z)
+## Nearest grabbable corner/edge on any sheet: {sheet, world, local, facet} or null.
+func find_handle(from_world: Vector3, radius: float):
+	var best = null
+	for s in sheets:
+		var h = s.nearest_handle(from_world, radius)
+		if h != null and (best == null or h.dist < best.dist):
+			h.sheet = s
+			best = h
+	return best
+
+
+## The sheet a player is standing on or right next to, for the slide/flip/turn
+## controls.
+func sheet_near(p: Node3D) -> PaperSheet:
+	var best: PaperSheet = null
+	var best_d := 3.0
+	for s in sheets:
+		var box: AABB = s.world_box()
+		box.position += s.global_position
+		var q := p.global_position
+		var closest := Vector3(
+			clampf(q.x, box.position.x, box.end.x), q.y, clampf(q.z, box.position.z, box.end.z))
+		var d := closest.distance_to(q)
+		if d < best_d:
+			best = s
+			best_d = d
+	return best
+
+
+## Slides a sheet; anyone standing on it is carried by physics.
+func push_sheet(s: PaperSheet, v: Vector3) -> void:
+	var b := s.world_box()
+	var p := s.position + Vector3(v.x, 0.0, v.z)
 	p.x = clampf(p.x, SHEET_LIMIT.position.x - b.position.x, SHEET_LIMIT.end.x - b.end.x)
-	p.z = clampf(p.z, SHEET_LIMIT.position.y - b.position.y, SHEET_LIMIT.end.y - b.end.y)
-	sheet.position = p
+	p.z = clampf(p.z, SHEET_LIMIT.position.y - b.position.z, SHEET_LIMIT.end.y - b.end.z)
+	s.position = p
 
 
-## After a fold changes the stack under someone's feet, raise them onto it.
-func _lift_players() -> void:
-	for p in players:
-		var top: float = sheet.top_at(p.global_position)
-		if top < 0.0:
-			continue
-		var y: float = sheet.global_position.y + top
-		if p.global_position.y < y and p.global_position.y > y - 4.0:
-			p.global_position.y = y + 0.05
-			p.velocity.y = 0.0
+func undo() -> void:
+	while not _undo_order.is_empty():
+		var s: PaperSheet = _undo_order.pop_back()
+		if s.undo():
+			_undo_order.pop_back() # undo() re-emits `folded`; drop that entry
+			return
 
 
 func _process(delta: float) -> void:
 	if Input.is_action_just_pressed("undo"):
-		sheet.undo()
+		undo()
 	if Input.is_action_just_pressed("reset"):
 		get_tree().reload_current_scene()
 		return
@@ -210,13 +247,18 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		cam_yaw -= event.relative.x * 0.003
 		cam_pitch = clampf(cam_pitch - event.relative.y * 0.003, -1.3, -0.15)
-	elif event is InputEventMouseButton and event.pressed and Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
-		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	elif event is InputEventMouseButton and event.pressed:
+		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
+			players[0].nudge_lift(0.2)
+		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+			players[0].nudge_lift(-0.2)
+		elif Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
+			Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	elif event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 
 
-## Shared orbit camera that keeps both players (and their reach) in frame.
+## Shared orbit camera that keeps both players in frame.
 func _update_camera(delta: float) -> void:
 	var lo: Vector3 = players[0].global_position
 	var hi: Vector3 = lo
@@ -233,9 +275,14 @@ func _update_camera(delta: float) -> void:
 
 
 func _update_hud() -> void:
-	var text := "P1: WASD move  Space jump  hold F / LMB near a corner or edge, then walk = fold  hold R / RMB + move = slide sheet\n"
-	text += "P2: Arrows move  / jump  hold . to fold  hold , + move to slide sheet   (pads: A jump, X fold, RB slide sheet)\n"
-	text += "Mouse / right stick / Q E: camera   Z: undo fold   Backspace: restart   Esc: release mouse   (click to capture mouse)"
+	var text := "P1: WASD move  Space jump  |  hold F/LMB on a glowing corner, walk to move it, Space/C or wheel raise/lower hands, release to crease\n"
+	text += "      hold R/RMB: move = slide sheet, Space = flip it over, F/LMB = turn it\n"
+	text += "P2: Arrows  / jump  . grab  ; lower  , sheet     Pads: A jump/raise  B lower  X grab  RB sheet\n"
+	text += "Mouse / right stick / Q E: camera   Z: undo fold   Backspace: restart   Esc: release mouse"
+	for p in players:
+		var st: String = p.fold_status()
+		if st != "":
+			text += "\nP%d %s" % [p.id, st]
 	if complete:
 		text += "\n\nLEVEL COMPLETE!"
 	_hud.text = text
@@ -248,9 +295,9 @@ func _setup_input() -> void:
 		return # already configured (scene reload)
 	var keys := {
 		1: {"left": KEY_A, "right": KEY_D, "up": KEY_W, "down": KEY_S,
-			"jump": KEY_SPACE, "grab": KEY_F, "sheet": KEY_R},
+			"jump": KEY_SPACE, "lower": KEY_C, "grab": KEY_F, "sheet": KEY_R},
 		2: {"left": KEY_LEFT, "right": KEY_RIGHT, "up": KEY_UP, "down": KEY_DOWN,
-			"jump": KEY_SLASH, "grab": KEY_PERIOD, "sheet": KEY_COMMA},
+			"jump": KEY_SLASH, "lower": KEY_SEMICOLON, "grab": KEY_PERIOD, "sheet": KEY_COMMA},
 	}
 	for pid in [1, 2]:
 		var device: int = pid - 1
@@ -261,6 +308,7 @@ func _setup_input() -> void:
 		_add_axis("p%d_up" % pid, JOY_AXIS_LEFT_Y, -1.0, device)
 		_add_axis("p%d_down" % pid, JOY_AXIS_LEFT_Y, 1.0, device)
 		_add_button("p%d_jump" % pid, JOY_BUTTON_A, device)
+		_add_button("p%d_lower" % pid, JOY_BUTTON_B, device)
 		_add_button("p%d_grab" % pid, JOY_BUTTON_X, device)
 		_add_button("p%d_sheet" % pid, JOY_BUTTON_RIGHT_SHOULDER, device)
 		_add_axis("cam_left", JOY_AXIS_RIGHT_X, -1.0, device)

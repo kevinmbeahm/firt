@@ -10,8 +10,10 @@ const AIR_ACCEL := 7.0
 const GRAVITY := 14.0
 const JUMP_SPEED := 6.2
 const STEP_HEIGHT := 0.55 ## walk up one paper layer without jumping
-const REACH := 2.3
+const REACH := 2.4 ## from the chest to a grabbable corner/edge
 const DRAG_SPEED_MULT := 0.6
+const LIFT_SPEED := 1.6 ## how fast held paper is raised/lowered (m/s)
+const LIFT_RANGE := Vector2(-3.0, 3.2)
 const FALL_DEATH_Y := -14.0
 const ARM_LEN := 0.75
 const MAX_ARM_STRETCH := 2.6
@@ -22,12 +24,14 @@ var level ## Level (untyped to avoid a circular class dependency)
 var spawn := Vector3.ZERO
 
 var grabbing := false
-var grab_point := Vector2.ZERO ## sheet-local corner being held
-var grab_height := 0.0
-var hover_handle = null ## Dictionary {pos, layer, y} or null
+var hover = null ## {sheet, world, local, facet} of the reachable corner/edge, or null
 
-var _grab_start_player := Vector2.ZERO
-var _grab_start_sheet := Vector2.ZERO
+var _grab_sheet: PaperSheet
+var _grab_facet := 0
+var _grab_local := Vector3.ZERO ## grabbed point, sheet-local
+var _grab_start_player := Vector3.ZERO
+var _grab_start_sheet := Vector3.ZERO
+var _lift := 0.0 ## how far the hands are raised above where they grabbed
 var _rig: Node3D
 var _arms: Array = []
 var _hands: Array = []
@@ -157,7 +161,7 @@ func _mat(c: Color) -> StandardMaterial3D:
 
 func respawn() -> void:
 	if grabbing:
-		level.sheet.cancel_fold()
+		_grab_sheet.cancel_fold()
 		grabbing = false
 	global_position = spawn
 	velocity = Vector3.ZERO
@@ -166,14 +170,20 @@ func respawn() -> void:
 # --- Physics -----------------------------------------------------------------
 
 func _physics_process(delta: float) -> void:
-	var sheet: PaperSheet = level.sheet
 	var input := Input.get_vector(_a("left"), _a("right"), _a("up"), _a("down"))
 	var wish: Vector3 = level.camera_basis() * Vector3(input.x, 0.0, input.y)
 
-	# Separate control: while held, movement slides the whole folded sheet.
-	var pushing_sheet := Input.is_action_pressed(_a("sheet")) and not grabbing
-	if pushing_sheet:
-		level.push_sheet(wish * level.sheet_speed * delta)
+	# Separate control: while held, movement slides the whole sheet, jump flips
+	# it over and grab turns it.
+	var handling_sheet := Input.is_action_pressed(_a("sheet")) and not grabbing
+	if handling_sheet:
+		var s: PaperSheet = level.sheet_near(self)
+		if s != null and not s.is_busy():
+			level.push_sheet(s, wish * level.sheet_speed * delta)
+			if Input.is_action_just_pressed(_a("jump")):
+				s.flip(level.camera_basis().x)
+			elif Input.is_action_just_pressed(_a("grab")):
+				s.turn(PI * 0.25)
 		wish = Vector3.ZERO
 
 	var speed := SPEED * (DRAG_SPEED_MULT if grabbing else 1.0)
@@ -182,9 +192,14 @@ func _physics_process(delta: float) -> void:
 	velocity.x = move_toward(velocity.x, target.x, accel * delta)
 	velocity.z = move_toward(velocity.z, target.z, accel * delta)
 
+	if grabbing:
+		# While holding paper, jump/lower raise and lower your hands instead.
+		var dir := Input.get_axis(_a("lower"), _a("jump"))
+		nudge_lift(dir * LIFT_SPEED * delta)
+
 	if is_on_floor():
 		velocity.y = maxf(velocity.y, 0.0)
-		if Input.is_action_just_pressed(_a("jump")):
+		if Input.is_action_just_pressed(_a("jump")) and not grabbing and not handling_sheet:
 			velocity.y = JUMP_SPEED
 		else:
 			_step_up(Vector3(velocity.x, 0.0, velocity.z) * delta)
@@ -192,10 +207,15 @@ func _physics_process(delta: float) -> void:
 		velocity.y -= GRAVITY * delta
 
 	move_and_slide()
-	_update_grab(sheet, pushing_sheet)
+	_update_grab(handling_sheet)
 
 	if global_position.y < FALL_DEATH_Y:
 		respawn()
+
+
+func nudge_lift(amount: float) -> void:
+	if grabbing:
+		_lift = clampf(_lift + amount, LIFT_RANGE.x, LIFT_RANGE.y)
 
 
 ## Lets the bean climb a single paper layer by walking into it.
@@ -213,40 +233,52 @@ func _step_up(motion: Vector3) -> void:
 	global_position += lift
 
 
-func _held_target_local(sheet: PaperSheet) -> Vector2:
-	## The held corner follows the player's movement, whatever the sheet does.
-	var p := Vector2(global_position.x, global_position.z)
-	var s := Vector2(sheet.position.x, sheet.position.z)
-	return grab_point + (p - _grab_start_player) - (s - _grab_start_sheet)
+## Where the hands hold the grabbed point now, in world space. It follows the
+## player's walking (not the sheet's own motion) and the raised/lowered hands.
+func _hands_world() -> Vector3:
+	var s := _grab_sheet
+	var walked := global_position - _grab_start_player
+	var slid := s.global_position - _grab_start_sheet
+	return s.to_global(_grab_local) + Vector3(walked.x - slid.x, _lift, walked.z - slid.z)
 
 
-func _update_grab(sheet: PaperSheet, pushing_sheet: bool) -> void:
+func _update_grab(handling_sheet: bool) -> void:
 	if grabbing:
-		var c := _held_target_local(sheet)
+		var t := _grab_sheet.to_local(_hands_world())
 		if Input.is_action_pressed(_a("grab")):
-			sheet.update_fold(grab_point, c)
+			_grab_sheet.update_fold(_grab_facet, _grab_local, t)
 		else:
-			sheet.finish_fold(grab_point, c)
+			_grab_sheet.finish_fold(_grab_facet, _grab_local, t)
 			grabbing = false
 		return
-	hover_handle = null
-	if pushing_sheet or sheet.fold_owner != null:
+	hover = null
+	if handling_sheet:
 		return
-	var local := Vector2(global_position.x - sheet.position.x, global_position.z - sheet.position.z)
-	hover_handle = sheet.nearest_handle(local, global_position.y - sheet.position.y, REACH)
-	if hover_handle != null and Input.is_action_just_pressed(_a("grab")):
-		if sheet.begin_fold(self):
+	hover = level.find_handle(global_position + Vector3.UP, REACH)
+	if hover != null and Input.is_action_just_pressed(_a("grab")):
+		var s: PaperSheet = hover.sheet
+		if s.begin_fold(self):
 			grabbing = true
-			grab_point = hover_handle.pos
-			grab_height = hover_handle.y
-			_grab_start_player = Vector2(global_position.x, global_position.z)
-			_grab_start_sheet = Vector2(sheet.position.x, sheet.position.z)
+			_grab_sheet = s
+			_grab_facet = hover.facet
+			_grab_local = hover.local
+			_grab_start_player = global_position
+			_grab_start_sheet = s.global_position
+			_lift = 0.0
+
+
+func fold_status() -> String:
+	if not grabbing:
+		return ""
+	var msg := "hands %+.1f m" % _lift
+	if _grab_sheet.fold_status != "":
+		msg += "  (" + _grab_sheet.fold_status + ")"
+	return msg
 
 
 # --- Procedural animation -----------------------------------------------------
 
 func _process(delta: float) -> void:
-	var sheet: PaperSheet = level.sheet
 	var flat := Vector3(velocity.x, 0.0, velocity.z)
 	var speed := flat.length()
 
@@ -254,11 +286,11 @@ func _process(delta: float) -> void:
 	var look_dir := flat
 	var reach_target = null
 	if grabbing:
-		reach_target = _hand_world(sheet)
+		reach_target = _hands_world()
 		look_dir = reach_target - global_position
 		look_dir.y = 0.0
-	elif hover_handle != null:
-		reach_target = sheet.global_position + Vector3(hover_handle.pos.x, hover_handle.y, hover_handle.pos.y)
+	elif hover != null:
+		reach_target = hover.world
 	if look_dir.length() > 0.15:
 		_yaw = lerp_angle(_yaw, atan2(-look_dir.x, -look_dir.z), 1.0 - exp(-10.0 * delta))
 	_rig.rotation.y = _yaw
@@ -295,21 +327,15 @@ func _process(delta: float) -> void:
 			arm.scale = Vector3.ONE
 		hand.global_position = arm.global_transform * Vector3(0, 0, -ARM_LEN)
 
-	# Marker.
+	# Marker on what you can grab / are holding.
 	if grabbing:
 		_marker.visible = true
-		_marker.global_position = _hand_world(sheet)
-	elif hover_handle != null:
+		_marker.scale = Vector3.ONE
+		_marker.global_position = _hands_world()
+	elif hover != null:
 		_marker.visible = true
 		var pulse := 1.0 + 0.2 * sin(Time.get_ticks_msec() * 0.008)
 		_marker.scale = Vector3.ONE * pulse
-		_marker.global_position = sheet.global_position + Vector3(hover_handle.pos.x, hover_handle.y + 0.25, hover_handle.pos.y)
+		_marker.global_position = hover.world + Vector3.UP * 0.2
 	else:
 		_marker.visible = false
-
-
-## Where the held corner currently is in the world (lifted during the swing).
-func _hand_world(sheet: PaperSheet) -> Vector3:
-	var c := _held_target_local(sheet)
-	var lift := 0.25 + 1.0 * sin(PI * sheet.fold_progress())
-	return Vector3(sheet.position.x + c.x, sheet.position.y + grab_height + lift, sheet.position.z + c.y)
