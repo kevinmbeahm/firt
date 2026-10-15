@@ -27,7 +27,8 @@ func check(cond: bool, msg: String) -> void:
 func try_fold(s: PaperSheet, facet: int, g: Vector3, t: Vector3) -> Dictionary:
 	s.begin_fold(self)
 	s.update_fold(facet, g, t)
-	var res := {"ok": s._preview.ok, "reason": s._preview.reason}
+	var res := {"ok": s._preview.ok, "reason": s._preview.reason,
+		"theta": rad_to_deg(s._preview.get("theta", 0.0)), "status": s.fold_status}
 	s.cancel_fold()
 	return res
 
@@ -39,17 +40,27 @@ func _process(_d: float) -> bool:
 		# The puzzle sheet lies on the island; its right edge (local x=9) is over ground.
 		var down := try_fold(s, 0, Vector3(9, T, 0), Vector3(8, -2, 0))
 		check(not down.ok and down.reason.begins_with("blocked"), "folding a flap down into the ground is refused (%s)" % down.reason)
-		var under := try_fold(s, 0, Vector3(9, T, 0), Vector3(-3, T - 0.5, 0))
-		check(not under.ok and under.reason.begins_with("blocked"), "folding a flap under a sheet lying on the floor is refused (%s)" % under.reason)
+		for h in [0.0, -0.02, -0.1, -0.5]:
+			var low := try_fold(s, 0, Vector3(9, T, 0), Vector3(-3, T + h, 0))
+			check(low.ok and low.theta > 179.0, "a flat fold with hands %+.2f m from the paper goes over the top (theta %.0f %s)" % [h, low.theta, low.reason])
 		var over := try_fold(s, 0, Vector3(9, T, 0), Vector3(-3, T + 0.5, 0))
 		check(over.ok, "folding the same flap over the top is fine (%s)" % over.reason)
+		var ramp_up := try_fold(s, 0, Vector3(9, T, 0), Vector3(8.4, 2.63, 0))
+		check(ramp_up.ok and absf(ramp_up.theta - 26.0) < 2.0, "lifting a ramp off the floor is unaffected (theta %.0f)" % ramp_up.theta)
 
 		# Hang the far edge over the island's side (z < -13) and fold it down.
 		s.freeze = true
 		s.global_transform = Transform3D(Basis.IDENTITY, Vector3(-12, 0, -12))
 	elif frame == 32:
 		var hang := try_fold(s, 0, Vector3(0, T, -6), Vector3(0, -2, -5))
-		check(hang.ok, "a flap over the void can be folded down to hang (%s)" % hang.reason)
+		check(hang.ok and hang.status == "", "a flap over the void can be folded down to hang freely (%s)" % hang.reason)
+
+		# Raised 1 m above the island, a flap lowered toward the floor stops on it.
+		s.global_transform = Transform3D(Basis.IDENTITY, Vector3(-12, 1, 0))
+	elif frame == 33:
+		var rest := try_fold(s, 0, Vector3(9, T, 0), Vector3(8, -3, 0))
+		check(rest.ok and rest.theta < -8.0 and rest.theta > -15.0 and rest.status.begins_with("resting"),
+			"a flap lowered from a raised sheet comes to rest on the ground (theta %.1f, %s)" % [rest.theta, rest.status])
 
 		# Undo needs room: fold a ramp, park the sheet so the flat strip would be inside the ledge.
 		s.global_transform = Transform3D(Basis.IDENTITY, Vector3(-12, 0, 0))

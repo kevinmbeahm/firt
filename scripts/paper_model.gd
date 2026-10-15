@@ -137,7 +137,10 @@ static func snap_target(src: Array, gi: int, g: Vector3, t: Vector3) -> Vector3:
 ## `moved` lists the facets (in `facets`) that rotated, and `swept` says they got
 ## there by turning `theta` about the crease (normal folds), so the caller can
 ## test that path against the world.
-static func plan_fold(src: Array, gi: int, g: Vector3, t: Vector3, up: Vector3, mode: int = FOLD_NORMAL) -> Dictionary:
+## `theta_override` (normal folds only) keeps the crease but uses that angle
+## instead of the one the hands ask for, e.g. to stop a flap against the ground.
+static func plan_fold(src: Array, gi: int, g: Vector3, t: Vector3, up: Vector3, mode: int = FOLD_NORMAL,
+		theta_override: float = NAN) -> Dictionary:
 	var res := {"ok": false, "reason": "", "facets": [], "axis_a": g, "axis_d": Vector3.ZERO,
 		"plane_n": Vector3.UP, "theta": 0.0, "moved": [], "swept": mode == FOLD_NORMAL}
 	var gf: Facet = src[gi]
@@ -176,7 +179,12 @@ static func plan_fold(src: Array, gi: int, g: Vector3, t: Vector3, up: Vector3, 
 	var vg := g - foot
 	var vt := t - foot
 	var theta := atan2(axis.dot(vg.cross(vt)), vg.dot(vt))
-	theta = _snap_angle(theta, axis, vg, up) if mode == FOLD_NORMAL else PI
+	if mode != FOLD_NORMAL:
+		theta = PI
+	elif is_nan(theta_override):
+		theta = _snap_angle(theta, axis, vg, up)
+	else:
+		theta = theta_override
 	if absf(theta) < MIN_ANGLE:
 		res.reason = "lift or drag to fold"
 		return res

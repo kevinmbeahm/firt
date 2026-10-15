@@ -138,10 +138,12 @@ func update_fold(facet: int, g: Vector3, t: Vector3, mode: int = PaperModel.FOLD
 	_plan_msec = Time.get_ticks_msec()
 	var snapped := PaperModel.snap_target(facets, facet, g, t)
 	_preview = PaperModel.plan_fold(facets, facet, g, snapped, up_local(), mode)
+	var note := ""
 	if _preview.ok and _blocked_by_world(_preview):
-		_preview.ok = false
-		_preview.reason = "blocked by the ground or something solid"
-	fold_status = "" if _preview.ok else _preview.reason
+		var plan := _preview
+		_preview = _unblocked(facet, g, snapped, mode, plan)
+		note = "" if not _preview.ok else _preview.get("note", "")
+	fold_status = _preview.reason if not _preview.ok else note
 	_build_mesh(_preview.facets if _preview.ok else facets)
 	_show_crease(_preview)
 
@@ -187,6 +189,51 @@ func undo() -> bool:
 	return true
 
 
+## A fold whose flap would run into something: like real paper, swing it the
+## other way if it was nearly flat anyway (e.g. hands a touch below the paper on
+## the floor), otherwise let it come to rest against whatever is in the way.
+func _unblocked(facet: int, g: Vector3, t: Vector3, mode: int, plan: Dictionary) -> Dictionary:
+	var blocked := plan.duplicate()
+	blocked.ok = false
+	blocked.reason = "blocked by the ground or something solid"
+	if not plan.swept:
+		return blocked
+	var theta: float = plan.theta
+	var clear := _clear_fraction(plan)
+	if clear < 0.02 and absf(theta) > deg_to_rad(150.0):
+		var over := PaperModel.plan_fold(facets, facet, g, t, up_local(), mode, -PI * signf(theta))
+		if over.ok and not _blocked_by_world(over):
+			return over
+	if absf(theta * clear) >= PaperModel.MIN_ANGLE:
+		var rest := PaperModel.plan_fold(facets, facet, g, t, up_local(), mode, theta * clear)
+		if rest.ok and not _blocked_by_world(rest):
+			rest.note = "resting against something solid"
+			return rest
+	return blocked
+
+
+## How far along its swing (0..1) a fold's flap gets before touching anything.
+func _clear_fraction(plan: Dictionary) -> float:
+	const STEPS := 8
+	var lo := 0.0
+	var hi := -1.0
+	for k in range(1, STEPS + 1):
+		var s := float(k) / STEPS
+		if _hits_world(plan, s, global_transform):
+			hi = s
+			break
+		lo = s
+	if hi < 0.0:
+		return 1.0
+	for i in 6: # narrow down the contact angle
+		var mid := (lo + hi) * 0.5
+		if _hits_world(plan, mid, global_transform):
+			hi = mid
+		else:
+			lo = mid
+	return maxf(lo - deg_to_rad(1.0) / maxf(absf(plan.theta), 0.01), 0.0)
+
+
 ## True if the sheet has barely moved since `xf` (a resting body jitters a little).
 func _same_pose(xf: Transform3D) -> bool:
 	var now := global_transform
@@ -200,22 +247,29 @@ func _same_pose(xf: Transform3D) -> bool:
 func _blocked_by_world(plan: Dictionary, pose: Transform3D = global_transform) -> bool:
 	if not is_inside_tree():
 		return false
+	for s in ([0.25, 0.5, 0.75, 1.0] if plan.swept else [1.0]):
+		if _hits_world(plan, s, pose):
+			return true
+	return false
+
+
+## Does the moving paper of `plan`, `s` of the way through its swing, overlap
+## anything solid? (Players don't count.)
+func _hits_world(plan: Dictionary, s: float, pose: Transform3D) -> bool:
 	var space := get_world_3d().direct_space_state
 	var query := PhysicsShapeQueryParameters3D.new()
 	query.exclude = [get_rid()]
 	query.collision_mask = collision_mask
 	query.transform = pose
-	var samples := [0.25, 0.5, 0.75, 1.0] if plan.swept else [1.0]
-	for s in samples:
-		var back := Transform3D.IDENTITY
-		if plan.swept:
-			var rot := Basis(plan.axis_d, plan.theta * (s - 1.0))
-			back = Transform3D(rot, plan.axis_a - rot * plan.axis_a)
-		for item in plan.moved:
-			query.shape = _probe(item, back)
-			for hit in space.intersect_shape(query, 4):
-				if not (hit.collider is CharacterBody3D):
-					return true
+	var back := Transform3D.IDENTITY
+	if plan.swept and s < 1.0:
+		var rot := Basis(plan.axis_d, plan.theta * (s - 1.0))
+		back = Transform3D(rot, plan.axis_a - rot * plan.axis_a)
+	for item in plan.moved:
+		query.shape = _probe(item, back)
+		for hit in space.intersect_shape(query, 4):
+			if not (hit.collider is CharacterBody3D):
+				return true
 	return false
 
 
