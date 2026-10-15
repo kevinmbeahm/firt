@@ -523,16 +523,22 @@ with an earlier mechanic, then a "free" room with several valid solutions.
 
 - **Stiffness:** do we fake sag with a breaking rule (§4.4), or skip it and
   use gusts or loads instead? Faking it risks feeling arbitrary.
+    - Skip this. No paper sag or breaking.
 - **Capacity check cost:** slicing a 150-facet model each physics tick is
   heavy. Compute it once when a fold is committed and cache it; only buoyancy
   (waterline vs. that cached profile) runs per tick.
+     - Compute it once and cache it makes sense.
 - **Undo scope:** per-room undo (P4 note) or unlimited? Unlimited undo makes
   "fold it small, then unfold" trivial.
+    - Unlimited would be best.
 - **Two-player carry:** does a sheet held by two players move as a kinematic
   object between their hands, or stay physical with springs at each grab?
   Springs are more Human-Fall-Flat-like (wobbly, fun) but harder to tune.
+     - Start with kinematic
 - **Soggy paper:** a timer on wet paper adds urgency to the River chapter, but
   could frustrate. Prototype it with and without.
+    - No soggy paper mechanic
 - **Single-player:** every puzzle above needs two players somewhere. Do we
   support solo play (an AI partner, or a "weight" prop to stand in for the
   second player)?
+    - Weight prop or swapping between two characters. Do not develop an AI partner
