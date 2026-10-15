@@ -9,7 +9,8 @@ const MERGE_DIST := 0.001
 ## Clips a convex polygon against the half plane (p - origin) . normal >= 0
 ## (or <= 0 when keep_positive is false). Returns an empty array when the
 ## result is degenerate.
-static func clip_half_plane(poly: PackedVector2Array, origin: Vector2, normal: Vector2, keep_positive: bool) -> PackedVector2Array:
+static func clip_half_plane(poly: PackedVector2Array, origin: Vector2, normal: Vector2, keep_positive: bool,
+		min_area: float = MIN_AREA) -> PackedVector2Array:
 	var out := PackedVector2Array()
 	var count := poly.size()
 	if count < 3:
@@ -24,7 +25,7 @@ static func clip_half_plane(poly: PackedVector2Array, origin: Vector2, normal: V
 			out.append(a)
 		if (da > 0.0 and db < 0.0) or (da < 0.0 and db > 0.0):
 			out.append(a + (b - a) * (da / (da - db)))
-	return _clean(out)
+	return _clean(out, min_area)
 
 
 static func signed_area(poly: PackedVector2Array) -> float:
@@ -53,7 +54,7 @@ static func centroid(poly: PackedVector2Array) -> Vector2:
 
 
 ## Removes repeated points and polygons too small to matter.
-static func _clean(poly: PackedVector2Array) -> PackedVector2Array:
+static func _clean(poly: PackedVector2Array, min_area: float = MIN_AREA) -> PackedVector2Array:
 	var out := PackedVector2Array()
 	for p in poly:
 		if out.is_empty() or out[out.size() - 1].distance_to(p) > MERGE_DIST:
@@ -71,9 +72,16 @@ static func _clean(poly: PackedVector2Array) -> PackedVector2Array:
 			out.remove_at(i)
 		else:
 			i += 1
-	if out.size() < 3 or absf(signed_area(out)) < MIN_AREA:
+	if out.size() < 3 or absf(signed_area(out)) < min_area:
 		return PackedVector2Array()
 	return out
+
+
+## The polygon with duplicate and collinear corners removed (keeps it however
+## small it is).
+static func tidy(poly: PackedVector2Array) -> PackedVector2Array:
+	var out := _clean(poly, 0.0)
+	return out if out.size() >= 3 else poly
 
 
 ## The polygon pulled in toward its centroid by `d` (convex polygons only).

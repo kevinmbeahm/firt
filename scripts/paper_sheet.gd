@@ -25,6 +25,7 @@ var fold_status := "" ## why the current drag can't fold, for the HUD
 var _history: Array = []
 var _offsets: Array = []
 var _preview: Dictionary = {}
+var _drag_side := 0 ## which side of its paper the flap being folded is on (+1 above, -1 below, 0 not far over yet)
 var _mesh_instance: MeshInstance3D
 var _crease: MeshInstance3D
 var _crease_ok_mat: StandardMaterial3D
@@ -121,6 +122,7 @@ func begin_fold(owner) -> bool:
 	if is_busy():
 		return false
 	fold_owner = owner
+	_drag_side = 0
 	return true
 
 
@@ -154,12 +156,20 @@ func update_fold(facet: int, g: Vector3, t: Vector3, mode: int = PaperModel.FOLD
 		snapped = PaperModel.snap_target(facets, facet, g, t)
 		_preview = PaperModel.plan_fold(facets, facet, g, snapped, up_local(), mode)
 		fold_choices = 0
+		# The flap moves continuously with the hands: once it's over on one side
+		# of the paper, hands pushed on through the paper's plane just press it
+		# flat there rather than flipping it through the paper to the other side.
+		if _preview.ok and _preview.swept and _drag_side != 0 and absf(_preview.theta) > PI * 0.5 \
+				and (1 if _preview.above else -1) != _drag_side:
+			_preview = PaperModel.plan_fold(facets, facet, g, snapped, up_local(), mode, -PI * signf(_preview.theta))
 	var note := ""
 	if _preview.ok and _blocked_by_world(_preview):
 		var plan := _preview
 		_preview = _unblocked(facet, g, snapped, mode, plan)
 		note = "" if not _preview.ok else _preview.get("note", "")
 	fold_status = _preview.reason if not _preview.ok else note
+	if _preview.ok and _preview.get("swept", false):
+		_drag_side = 0 if absf(_preview.theta) < PI * 0.5 else (1 if _preview.above else -1)
 	_build_mesh(_preview.facets if _preview.ok else facets)
 	_show_crease(_preview)
 
@@ -481,7 +491,8 @@ func _rebuild_collision() -> void:
 
 
 func _build_mesh(list: Array) -> void:
-	var offsets := _offsets if list == facets else PaperModel.stack_offsets(list)
+	var moved: Array = _preview.get("moved", []) if not _preview.is_empty() else []
+	var offsets := _offsets if list == facets else PaperModel.stack_offsets(list, moved)
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	st.set_material(_material)

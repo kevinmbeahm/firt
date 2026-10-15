@@ -55,6 +55,23 @@ func _process(_d: float) -> bool:
 		var hang := try_fold(s, 0, Vector3(0, T, -6), Vector3(0, -2, -5))
 		check(hang.ok and hang.status == "", "a flap over the void can be folded down to hang freely (%s)" % hang.reason)
 
+		# Over the void nothing stops a flap going either way, so this is just
+		# about following the hands: a flap carried over the top and then pressed
+		# a little below the paper stays on top (pressed flat), instead of jumping
+		# through the paper to underneath.
+		var g := Vector3(0, T, -6)
+		s.begin_fold(self)
+		s.update_fold(0, g, Vector3(0, T + 0.3, -3), PaperModel.FOLD_NORMAL, true)
+		var on_top: bool = s._preview.ok and s._preview.above
+		s.update_fold(0, g, Vector3(0, T - 0.3, -3), PaperModel.FOLD_NORMAL, true)
+		check(on_top and s._preview.ok and s._preview.above and absf(absf(s._preview.theta) - PI) < 1e-3,
+			"hands pushed below the paper press a flap that's over the top flat, not through to underneath")
+		s.cancel_fold()
+		s.begin_fold(self)
+		s.update_fold(0, g, Vector3(0, T - 0.3, -3), PaperModel.FOLD_NORMAL, true)
+		check(s._preview.ok and not s._preview.above, "taken under from the start, the same flap folds underneath")
+		s.cancel_fold()
+
 		# Raised 1 m above the island, a flap lowered toward the floor stops on it.
 		s.global_transform = Transform3D(Basis.IDENTITY, Vector3(-12, 1, 0))
 	elif frame == 33:

@@ -23,6 +23,7 @@ const MIN_ANGLE := deg_to_rad(4.0)
 const VERTEX_SNAP := 0.6
 const EDGE_SNAP := 0.35
 const CREASE_SNAP := 0.15
+const SLIVER_AREA := 0.001 ## square metres: a crease shaving off less than this from a facet just misses it
 const VERTEX_AXIS_SNAP := 0.12 ## a crease passing this close to a paper corner goes through it
 const FLAT_SNAP := deg_to_rad(12.0)
 const RIGHT_SNAP := deg_to_rad(6.0)
@@ -214,10 +215,17 @@ static func plan_fold(src: Array, gi: int, g: Vector3, t: Vector3, up: Vector3, 
 		var holds_axis := absf(nf.dot(axis)) < 1e-3 and absf(nf.dot(a - f.xf.origin)) < EPS
 		if holds_axis and a2.length() > 1e-4:
 			var o2 := -b * a2 / a2.length_squared()
+			var kept := false
 			for s in [1.0, -1.0]:
-				var part := PaperGeometry.clip_half_plane(f.pts, o2, a2, s > 0.0)
+				var part := PaperGeometry.clip_half_plane(f.pts, o2, a2, s > 0.0, SLIVER_AREA)
 				if part.size() >= 3:
 					pieces.append({"f": Facet.new(part, f.xf, f.layer, f.creases.duplicate()), "side": s, "src": i})
+					kept = true
+			if not kept:
+				# A facet too small to cut into pieces worth keeping stays whole
+				# (paper never just disappears), on the side most of it is on.
+				var side := 1.0 if (PaperGeometry.centroid(f.pts) - o2).dot(a2) >= 0.0 else -1.0
+				pieces.append({"f": Facet.new(PaperGeometry.tidy(f.pts), f.xf, f.layer, f.creases.duplicate()), "side": side, "src": i})
 		else:
 			var c := f.at(PaperGeometry.centroid(f.pts))
 			pieces.append({"f": f.clone(), "side": signf(cut_n.dot(c - a)), "src": i})
@@ -277,6 +285,21 @@ static func plan_fold(src: Array, gi: int, g: Vector3, t: Vector3, up: Vector3, 
 	if mode != FOLD_NORMAL:
 		return _finish_reverse(res, pieces, adj, moving, a, axis, vg, canonical(n), mode == FOLD_INSIDE_REVERSE)
 
+	# The flap has to lift off whatever it lies against: paper that stays put and
+	# lies on top of it (on the side it swings toward) holds it down.
+	var cn := canonical(n)
+	var lands_above := cn.dot(Basis(axis, theta * 0.5) * vg) >= 0.0
+	for i in moving:
+		var mf: Facet = pieces[i].f
+		for j in pieces.size():
+			if moving.has(j):
+				continue
+			var sf: Facet = pieces[j].f
+			if (sf.layer > mf.layer) != lands_above or not _coplanar(mf, sf) or not _overlaps(mf, sf):
+				continue
+			res.reason = "other paper is lying on it"
+			return res
+
 	# Rotate the moving paper and give it a stacking order.
 	var rot := Basis(axis, theta)
 	var spin := Transform3D(rot, a - rot * a)
@@ -291,8 +314,6 @@ static func plan_fold(src: Array, gi: int, g: Vector3, t: Vector3, up: Vector3, 
 		if moving.has(i):
 			mtop = maxi(mtop, l)
 			mbottom = mini(mbottom, l)
-	var cn := canonical(n)
-	var lands_above := cn.dot(Basis(axis, theta * 0.5) * vg) >= 0.0
 	var reversed := (rot * cn).dot(canonical(rot * cn)) < 0.0
 	var out: Array = []
 	var moved: Array = []
@@ -362,6 +383,7 @@ static func plan_fold(src: Array, gi: int, g: Vector3, t: Vector3, up: Vector3, 
 	res.facets = out
 	res.moved = moved
 	res.theta = theta
+	res.above = lands_above
 	return res
 
 
@@ -387,7 +409,7 @@ static func _enclose_trapped(pieces: Array, adj: Array, moving: Dictionary, movi
 					if moving.has(k) or pieces[k].side != moving_sign:
 						continue
 					var fk: Facet = pieces[k].f
-					if fk.layer <= lo or fk.layer >= hi or not _coplanar(fk, fi) or not _overlaps(fk, fi):
+					if fk.layer <= lo or fk.layer >= hi or not _coplanar(fk, fi) or not _in_pocket(fk, fi, fj):
 						continue
 					moving[k] = true
 					changed = true
@@ -420,6 +442,26 @@ static func _overlaps(a: Facet, b: Facet) -> bool:
 		var w := b.at(p)
 		pb.append(Vector2(w.dot(u), w.dot(v)))
 	return PaperGeometry.overlap_area(pa, pb) > 0.01
+
+
+## Whether coplanar facet `k` reaches into the pocket between the folded pair
+## `a`, `b` (where they overlap each other), rather than just overlapping one
+## of them somewhere else.
+static func _in_pocket(k: Facet, a: Facet, b: Facet) -> bool:
+	var cn := canonical(a.normal())
+	var u := cn.cross(Vector3.UP if absf(cn.y) < 0.9 else Vector3.RIGHT).normalized()
+	var v := cn.cross(u)
+	var flat := func(f: Facet) -> PackedVector2Array:
+		var poly := PackedVector2Array()
+		for p in f.pts:
+			var w := f.at(p)
+			poly.append(Vector2(w.dot(u), w.dot(v)))
+		return poly
+	var pk: PackedVector2Array = flat.call(k)
+	for pocket in Geometry2D.intersect_polygons(flat.call(a), flat.call(b)):
+		if PaperGeometry.overlap_area(pk, pocket) > 0.01:
+			return true
+	return false
 
 
 ## True when non-coplanar facets `a` and `b` cut through each other: the line
@@ -632,19 +674,21 @@ static func _finish_reverse(res: Dictionary, pieces: Array, adj: Array, moving: 
 		res.reason = "reverse folds need a folded edge (two joined layers)"
 		return res
 
-	# Upper side = components stacked above the middle of the moving paper.
+	# Upper side = the components making up the top half of the moving layers
+	# (by stacking rank: layer numbers have gaps where other paper lies).
 	var means: Array = []
 	for members in comps:
 		var total := 0.0
 		for i in members:
 			total += pieces[i].f.layer
 		means.append(total / members.size())
-	var mid: float = (means.min() + means.max()) * 0.5
+	var by_rank: Array = range(comps.size())
+	by_rank.sort_custom(func(x: int, y: int) -> bool: return means[x] < means[y])
 	var upper := {}
 	var lower := {}
-	for c in comps.size():
-		for i in comps[c]:
-			if means[c] > mid:
+	for r in by_rank.size():
+		for i in comps[by_rank[r]]:
+			if r >= by_rank.size() / 2:
 				upper[i] = true
 			else:
 				lower[i] = true
@@ -696,10 +740,10 @@ static func _finish_reverse(res: Dictionary, pieces: Array, adj: Array, moving: 
 			moved.append(nf)
 
 	# Let the layer solver stack it physically. Paper that didn't move keeps its
-	# order. Across the new crease, each tip piece goes toward the inside of the
-	# flap (the middle of the unmoved layers along the crease) for an inside
-	# reverse fold, and toward the outside for an outside one. The fold rules
-	# work out how the tips stack among themselves.
+	# order. Across the new crease, each tip piece ends up on the side of its
+	# unmoved neighbour that it swung through (inside the flap for an inside
+	# reverse fold, outside for an outside one). The fold rules work out how
+	# the tips stack among themselves.
 	var out: Array = []
 	var guess: Array = []
 	var order := range(keyed.size())
@@ -709,13 +753,27 @@ static func _finish_reverse(res: Dictionary, pieces: Array, adj: Array, moving: 
 		guess[order[r]] = r
 	for i in keyed.size():
 		out.append(keyed[i][1])
-	var rims: Array = [] # unmoved layers along the crease
+	# Which half of the flap each unmoved piece belongs with: the paper joined
+	# (nearest) to the upper layers or to the lower ones. The tips stay between
+	# the two, as they go in between the flap's layers, rather than slipping
+	# into some pocket on one side.
+	var half := {}
+	var frontier: Array = []
 	for i in moving:
 		for link in adj[i]:
-			if not moving.has(link[0]) and not rims.has(pieces[link[0]].f.layer):
-				rims.append(pieces[link[0]].f.layer)
-	rims.sort()
-	var middle: float = (rims[0] + rims[rims.size() - 1]) * 0.5 if not rims.is_empty() else 0.0
+			if not moving.has(link[0]) and not half.has(link[0]):
+				half[link[0]] = 1 if upper.has(i) else -1
+				frontier.append(link[0])
+	while not frontier.is_empty():
+		var next: Array = []
+		for cur in frontier:
+			for link in adj[cur]:
+				var j: int = link[0]
+				if moving.has(j) or half.has(j):
+					continue
+				half[j] = half[cur]
+				next.append(j)
+		frontier = next
 	var known := {}
 	var prefer := {}
 	for i in out.size():
@@ -724,6 +782,10 @@ static func _finish_reverse(res: Dictionary, pieces: Array, adj: Array, moving: 
 				continue
 			var key := "%d,%d" % [i, j]
 			prefer[key] = guess[i] < guess[j]
+			if moving.has(i) != moving.has(j):
+				var still: int = j if moving.has(i) else i
+				if half.has(still):
+					prefer[key] = (half[still] > 0) == (still == j) # tip below the upper half, above the lower
 			if not moving.has(i) and not moving.has(j):
 				known[key] = pieces[i].f.layer < pieces[j].f.layer
 	for i in moving:
@@ -731,8 +793,8 @@ static func _finish_reverse(res: Dictionary, pieces: Array, adj: Array, moving: 
 			var j: int = link[0]
 			if moving.has(j):
 				continue
-			var rim_above_middle: bool = pieces[j].f.layer > middle
-			var tip_below: bool = rim_above_middle == inside
+			# A tip lands on the side of its rim that it swung through.
+			var tip_below: bool = upper.has(i) == inside
 			var lo := mini(i, j)
 			known["%d,%d" % [lo, maxi(i, j)]] = (lo == i) == tip_below
 	var ranks := PaperLayers.solve(out, known, prefer, guess)
@@ -816,7 +878,9 @@ static func shared_edge(a: PackedVector2Array, b: PackedVector2Array) -> PackedV
 
 ## Per-facet offsets that lift overlapping coplanar layers apart by LAYER_GAP,
 ## in stacking order, so thin paper never z-fights or interpenetrates.
-static func stack_offsets(list: Array) -> Array:
+## `not_base` lists facets that shouldn't be taken as the main stack (the paper
+## a fold is moving).
+static func stack_offsets(list: Array, not_base: Array = []) -> Array:
 	var count := list.size()
 	var offsets: Array = []
 	offsets.resize(count)
@@ -858,7 +922,62 @@ static func stack_offsets(list: Array) -> Array:
 				e = elev[j] + 1
 		elev[i] = e
 		offsets[i] = normals[i] * (e * LAYER_GAP)
+	_carry_offsets(list, offsets, flat, normals, not_base)
 	return offsets
+
+
+## Paper standing out of the main stack (a flap part-way through a fold, a
+## spread wing) is lifted along with the layer it's hinged to, so it stays
+## attached at its crease instead of swinging out of the bottom of the stack
+## (and passing through the layers above it on the way).
+static func _carry_offsets(list: Array, offsets: Array, flat: Array, normals: Array, not_base: Array) -> void:
+	var count := list.size()
+	# The main stack: the plane holding the most paper (ignoring `not_base`).
+	var plane_of: Array = []
+	plane_of.resize(count)
+	var plane_area: Array = []
+	var plane_rep: Array = []
+	for i in count:
+		var f: Facet = list[i]
+		var k := -1
+		for p in plane_rep.size():
+			if _coplanar(f, list[plane_rep[p]]):
+				k = p
+				break
+		if k < 0:
+			k = plane_rep.size()
+			plane_rep.append(i)
+			plane_area.append(0.0)
+		plane_of[i] = k
+		if not not_base.has(f):
+			plane_area[k] += absf(PaperGeometry.signed_area(flat[i]))
+	if plane_rep.size() < 2:
+		return
+	var base := 0
+	for p in plane_area.size():
+		if plane_area[p] > plane_area[base]:
+			base = p
+	var carry: Array = []
+	carry.resize(count)
+	var queue: Array = []
+	for i in count:
+		if plane_of[i] == base:
+			carry[i] = Vector3.ZERO
+			queue.append(i)
+	while not queue.is_empty():
+		var s: int = queue.pop_front()
+		for i in count:
+			if carry[i] != null:
+				continue
+			if shared_edge(list[s].pts, list[i].pts).is_empty():
+				continue
+			# Same plane: lifted the same way. Another plane: lifted to where
+			# the hinge is shown.
+			carry[i] = carry[s] if plane_of[i] == plane_of[s] else carry[s] + offsets[s]
+			queue.append(i)
+	for i in count:
+		if carry[i] != null:
+			offsets[i] = offsets[i] + carry[i]
 
 
 ## Grabbable corners and edge midpoints, one per spot (the layer nearest `up`
@@ -1300,8 +1419,11 @@ static func _stack_collapse(src: Array, gi: int, state: Dictionary, found: Dicti
 	var on_path := {}
 	var walker: int = gi
 	while walker >= 0:
-		on_path[walker] = true
+		on_path[find.call(walker)] = true # the whole rigid piece carrying it
 		walker = state.parent[walker]
+	for i in n:
+		if on_path.has(find.call(i)):
+			on_path[i] = true
 	var lift_up: bool = canonical(src[gi].normal()).dot(up) >= 0.0
 	for k in state.toggled:
 		var h: Dictionary = hs[k]
@@ -1309,7 +1431,11 @@ static func _stack_collapse(src: Array, gi: int, state: Dictionary, found: Dicti
 			continue
 		var child: int = h.j if state.parent[h.j] == h.i else h.i
 		var parent: int = h.i if child == h.j else h.j
-		var child_above: bool = on_path.has(child) == lift_up
+		# Paper folding off a layer that stays put comes up with the lifted flap
+		# (in a square base the side flaps fold in between front and back);
+		# paper folding off moving paper tucks under it.
+		var parent_still := _same_pose(delta[parent], Transform3D.IDENTITY)
+		var child_above: bool = lift_up if parent_still and not on_path.has(child) else on_path.has(child) == lift_up
 		var a: int = mini(child, parent)
 		var b: int = maxi(child, parent)
 		prefer["%d,%d" % [a, b]] = (a == parent) == child_above
@@ -1375,7 +1501,7 @@ static func validate(list: Array, paper_area: float) -> Array:
 	var total := 0.0
 	for f in list:
 		total += absf(PaperGeometry.signed_area((f as Facet).pts))
-	if absf(total - paper_area) > 0.01 * paper_area:
+	if absf(total - paper_area) > 1e-3 * paper_area:
 		problems.append("paper area %.2f != %.2f" % [total, paper_area])
 	for i in list.size():
 		for j in range(i + 1, list.size()):

@@ -111,6 +111,7 @@ func _init() -> void:
 
 	r = fold(fs, Vector3(3, T, 4.25), Vector3(-1, T, 4.25))
 	check(r.ok, "fold the top wing over")
+	check(r.ok and lands_on_top(r.facets, r.moved), "the folded-over wing lies on top of the paper it covers")
 	var before := fs.size()
 	fs = r.facets
 	check(fs.size() == 2 * before, "wing crease splits every layer but only the top half moves")
@@ -123,7 +124,7 @@ func _init() -> void:
 	fs = r.facets
 	check(moved_normals(fs, Vector3.RIGHT) == 2, "only the top wing's two layers stand up")
 	r = fold(fs, Vector3(-1, T, 4.25), Vector3(1, -2.0, 4.25), true)
-	check(r.ok, "open the bottom wing to -90 deg")
+	check(r.ok, "open the bottom wing to -90 deg (%s)" % r.reason)
 	fs = r.facets
 	check(moved_normals(fs, Vector3.RIGHT) == 4, "both wings are now perpendicular to the keel: a paper plane")
 
@@ -136,7 +137,51 @@ func _init() -> void:
 	check(ramp.ok and absf(tilt - 25.7) < 1.0, "raised hands give a partial fold (ramp at %.1f deg)" % tilt)
 	reverse_fold_tests()
 	unfold_tests()
+	stacking_tests()
 	quit(0 if ok else 1)
+
+
+## Every moved facet sits above every unmoved coplanar facet it overlaps.
+func lands_on_top(fs: Array, moved: Array) -> bool:
+	for m in moved:
+		for f in fs:
+			if moved.has(f) or not PaperModel._coplanar(m, f) or not PaperModel._overlaps(m, f):
+				continue
+			if (m as PaperModel.Facet).layer < (f as PaperModel.Facet).layer:
+				return false
+	return true
+
+
+## Layers stay physical while folding a stack: paper lying on a flap holds it
+## down, and a flap part-way through a fold is drawn attached to its own layer.
+func stacking_tests() -> void:
+	var fs := PaperModel.make_sheet(Vector2(8, 6))
+	var r := fold(fs, Vector3(4, T, 0), Vector3(-4, T, 0))
+	check(r.ok and lands_on_top(r.facets, r.moved), "fold a sheet in half: the right half lands on top")
+	fs = r.facets
+	# Bottom layer's free corner: it can't come up through the layer on top...
+	r = fold(fs, Vector3(-4, T, -3), Vector3(-2, T + 1.5, -1), true)
+	check(not r.ok and r.reason == "other paper is lying on it", "the bottom layer can't lift through the layer on top (%s)" % r.reason)
+	# ...but it can fold down and away from it.
+	r = fold(fs, Vector3(-4, T, -3), Vector3(-2, T - 1.5, -1), true)
+	check(r.ok, "the bottom layer folds down, away from the layer on top (%s)" % r.reason)
+	# The top layer's corner, part-way up: drawn hinged to its own (raised)
+	# layer, not swinging out from under the stack.
+	r = fold(fs, Vector3(-4, T, -3), Vector3(-2, T + 1.5, -1))
+	check(r.ok, "the top layer's corner lifts part-way")
+	var offsets := PaperModel.stack_offsets(r.facets, r.moved)
+	var worst := 0.0
+	for i in r.facets.size():
+		for j in r.facets.size():
+			var mi: bool = r.moved.has(r.facets[i])
+			if i == j or not mi or r.moved.has(r.facets[j]):
+				continue
+			var seg := PaperModel.shared_edge(r.facets[i].pts, r.facets[j].pts)
+			for q in seg:
+				var shown_i: Vector3 = r.facets[i].at(q) + offsets[i]
+				var shown_j: Vector3 = r.facets[j].at(q) + offsets[j]
+				worst = maxf(worst, shown_i.distance_to(shown_j))
+	check(worst < 0.001, "the lifted flap is drawn attached at its crease (gap %.3f m)" % worst)
 
 
 ## Unfolding: carrying a folded flap back only roughly should swing it about its

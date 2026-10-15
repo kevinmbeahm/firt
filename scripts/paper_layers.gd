@@ -63,8 +63,10 @@ static func solve(list: Array, known: Dictionary, prefer: Dictionary, old_layers
 		var pair: Array = info.pairs[v]
 		nbr[pair[0]].append(pair[1])
 		nbr[pair[1]].append(pair[0])
+	# Node 0 may no longer be its class's root: pick the root's value that
+	# makes node 0 itself "false".
 	var st := {"info": info, "cls": cls, "par": par, "members": members, "nbr": nbr,
-		"value": {zero: false}, "trail": [], "nodes": 0, "prefer": prefer}
+		"value": {zero: uf.parity(0) == 1}, "trail": [], "nodes": 0, "prefer": prefer}
 	# Classes tied to the constant are decided already; propagate from them.
 	if not _propagate(st, [zero]):
 		last_failure = "contradiction (stacking order)"
@@ -239,6 +241,7 @@ static func check(list: Array) -> Array:
 
 # --- Internals -----------------------------------------------------------------
 
+
 ## Overlapping pairs (the variables) and the parity constraints between them.
 static func _analyse(list: Array) -> Dictionary:
 	var n := list.size()
@@ -282,6 +285,7 @@ static func _analyse(list: Array) -> Dictionary:
 
 	var equalities: Array = [] # [var, var, parity]: var1 xor var2 == parity
 	var folds: Array = [] # [a, b, p0, p1] in plane coords, for taco-taco
+	var seams: Array = [] # the same for flat (unfolded) joins
 	for a in n:
 		for b in range(a + 1, n):
 			if plane[a] != plane[b]:
@@ -298,6 +302,8 @@ static func _analyse(list: Array) -> Dictionary:
 			var folded := fa.normal().dot(list[b].normal()) < -0.99
 			if folded:
 				folds.append([a, b, p0, p1])
+			else:
+				seams.append([a, b, p0, p1])
 			# Paper k spanning this fold/seam stays on one side of both a and b.
 			for k in n:
 				if k == a or k == b or plane[k] != plane[a]:
@@ -309,6 +315,29 @@ static func _analyse(list: Array) -> Dictionary:
 				if la[0] < 0 or lb[0] < 0:
 					continue
 				equalities.append([la[0], lb[0], la[1] ^ lb[1]])
+
+	# A flat seam is paper that carries on across the line, just split there:
+	# like paper spanning it, it can't sit between a fold's two layers on that
+	# line (taco-tortilla), and two seams on one line can't cross over each
+	# other (tortilla-tortilla).
+	for s1 in seams:
+		for f2 in folds + seams:
+			if f2 == s1 or not _collinear_overlap(s1[2], s1[3], f2[2], f2[3]):
+				continue
+			if f2 in folds:
+				for k in [s1[0], s1[1]]:
+					var la: Array = lit.call(k, f2[0])
+					var lb: Array = lit.call(k, f2[1])
+					if la[0] >= 0 and lb[0] >= 0:
+						equalities.append([la[0], lb[0], la[1] ^ lb[1]])
+			elif seams.find(f2) > seams.find(s1):
+				for flip in [false, true]:
+					var c2: int = f2[1] if flip else f2[0]
+					var d2: int = f2[0] if flip else f2[1]
+					var la: Array = lit.call(s1[0], c2)
+					var lb: Array = lit.call(s1[1], d2)
+					if la[0] >= 0 and lb[0] >= 0:
+						equalities.append([la[0], lb[0], la[1] ^ lb[1]])
 
 	# Folds along overlapping stretches of one line must nest.
 	var taco_taco: Array = []
@@ -330,11 +359,11 @@ static func _analyse(list: Array) -> Dictionary:
 	return {"vars": vars, "pairs": pairs, "equalities": equalities, "taco_taco": taco_taco}
 
 
+## Does (inset) polygon `poly` cover any real stretch of the line p0-p1?
 static func _spans(poly: PackedVector2Array, p0: Vector2, p1: Vector2) -> bool:
-	for t in [0.2, 0.4, 0.5, 0.6, 0.8]:
-		if Geometry2D.is_point_in_polygon(p0.lerp(p1, t), poly):
-			return true
-	return false
+	if poly.size() < 3:
+		return false
+	return PaperModel._segment_inside(p0, p1, poly) > 0.01
 
 
 static func _collinear_overlap(a0: Vector2, a1: Vector2, b0: Vector2, b1: Vector2) -> bool:
