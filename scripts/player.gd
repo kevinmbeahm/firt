@@ -238,6 +238,7 @@ func _press_on_paper() -> void:
 	_floor_body = hit.get("collider")
 	var body := _floor_body as RigidBody3D
 	if body != null:
+		body.sleeping = false
 		body.apply_force(Vector3.DOWN * WEIGHT, hit.position - body.global_position)
 
 
@@ -266,6 +267,8 @@ func _hands_world() -> Vector3:
 
 
 func _update_grab(handling_sheet: bool) -> void:
+	if grabbing and _grab_sheet.fold_owner != self:
+		grabbing = false # the sheet dropped the fold (respawned, reset...)
 	if grabbing:
 		var t := _grab_sheet.to_local(_hands_world())
 		if Input.is_action_pressed(_a("grab")):

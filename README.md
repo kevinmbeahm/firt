@@ -25,6 +25,7 @@ The paper is thin (3 cm) and folds like real paper, rigidly, at any angle:
 - Release to make the crease permanent (Z undoes it).
 - Only the paper **connected** to what you grabbed moves. Fold a stack in half and you can still fold just the top flap: that's how you do a paper plane's wings. A fold that would need to tear paper that's joined elsewhere is refused (the crease line turns red and the HUD says why).
 - Re-folding along an existing crease reuses it exactly, so you can open wings back out or unfold.
+- Paper is solid: a fold is refused (red crease, reason in the HUD) if the flap would swing through the ground or anything solid, or end up passing through other paper. Over the void you *can* fold a flap down to hang. Corners buried under a layer on top can't be grabbed; flip the sheet to reach the other side.
 - **Reverse folds** (Tab / ' / Y while holding paper): on a folded edge (layers joined at a spine, e.g. a strip folded in half), the two sides of the tip swing about the same crease in opposite directions. An *inside reverse fold* tucks the tip between the layers (a crane's neck and tail); an *outside reverse fold* wraps it around them. They need a folded edge and are always flat.
 - Hold *sheet handling* to slide the whole sheet (riders are carried; if you're not on it you walk alongside), flip it over (to fold the other side) or turn it.
 
@@ -33,6 +34,7 @@ Each sheet is a rigid body with real weight (mass from its area; centre of mass 
 - It rests on whatever holds it up and slides with friction.
 - Hang it too far over an edge and it tips and falls. Your weight counts: walking out onto an overhang can tip a sheet that was balanced.
 - A sheet lost in the void comes back at its starting spot (with its folds).
+- You can only slide a sheet that's resting on something (no steering it in mid-fall). Flips, turns and undos are refused when the paper would end up inside something solid.
 
 ## Level 1
 Get both players to the flag on the 2.2 m ledge across a 7 m gap; too high to jump, too far to just slide the sheet across (it would tip into the void). Fold part of the big sheet up into a **ramp**, ride the sheet out until the ramp's tip reaches over the ledge so it's held up at both ends, and walk up.
@@ -41,6 +43,7 @@ The smaller sheet on the island is a free-folding sandbox: try a paper plane, or
 
 ## Tests
 - `godot --headless -s tests/fold_model.gd` folds a paper plane step by step and checks layer-selective folds, partial angles, crease reuse, tear refusal, and inside/outside reverse folds.
+- `godot --headless -s tests/fold_physics.gd` checks folds against the world and the rigid body: no folding into or under the ground, hanging flaps over the void, no paper through paper, buried corners, undo/turn needing room, no steering falling sheets, clean grab release, respawn orientation.
 - `godot --headless -s tests/paper_physics.gd` checks sheets rest, tip into the void when pushed over an edge, respawn, and tip under the players' weight.
 - `godot --headless -s tests/solve_level.gd` has bots solve level 1 with real input actions (fold a ramp, ride the sheet out to the ledge, climb) and asserts the win condition.
 
@@ -53,6 +56,7 @@ The smaller sheet on the island is a free-folding sandbox: try a paper plane, or
 
 ## Known limits / next steps
 - Fold kinds so far: single-crease folds plus inside/outside reverse folds. A full crane also needs **squash** and **petal** folds (more creases moving together); those are next.
-- Paper is rigid between creases: a whole sheet tips and falls, but a flap doesn't droop or bend under its own weight, and folds don't collide with other layers or the world.
+- Paper is rigid between creases: a whole sheet tips and falls, but a flap doesn't droop or bend under its own weight.
+- Fold collision checks the folded result (and, for ordinary folds, the flap's swing) against the world, but checks paper-against-paper only for the final position, so a flap can still swing through other paper on its way to a valid spot.
 - Flip turns a sheet 180 deg; there's no free 3D rotation yet (e.g. to stand a finished plane upright, or throw it).
 - Local co-op only, shared camera.

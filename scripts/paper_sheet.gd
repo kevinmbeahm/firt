@@ -37,10 +37,16 @@ var _push_velocity = null ## horizontal velocity requested by a player this fram
 var _slide := Vector3.ZERO ## commanded slide velocity, ramps toward the request
 var spawn_transform := Transform3D.IDENTITY
 var _respawn := false
+var _plan_key := [] ## inputs of the current preview, to skip re-planning when idle
+var _plan_msec := 0 ## when the preview was last planned (live previews run at ~30 Hz)
+var _handles: Array = [] ## cached grab points (rebuilt when the paper or its "up" changes)
+var _handles_up := Vector3.ZERO
 
 
 func _init() -> void:
 	continuous_cd = true
+	contact_monitor = true # lets the slide control tell a resting sheet from a falling one
+	max_contacts_reported = 4
 	linear_damp = 0.2
 	angular_damp = 1.0
 	center_of_mass_mode = RigidBody3D.CENTER_OF_MASS_MODE_CUSTOM
@@ -116,25 +122,39 @@ func begin_fold(owner) -> bool:
 
 ## g and t are sheet-local: the grabbed point and where the hands hold it now.
 ## `mode` is one of PaperModel's FOLD_* kinds.
-func update_fold(facet: int, g: Vector3, t: Vector3, mode: int = PaperModel.FOLD_NORMAL) -> void:
+func update_fold(facet: int, g: Vector3, t: Vector3, mode: int = PaperModel.FOLD_NORMAL, force := false) -> void:
 	if mode != PaperModel.FOLD_NORMAL:
 		var n: Vector3 = facets[facet].normal()
 		t -= n * n.dot(t - g) # reverse folds are flat
+	# Planning is costly; only redo it when the hands actually moved, and at
+	# most ~30 times a second for the live preview.
+	if not force:
+		if _plan_key.size() == 4 and _plan_key[0] == facet and _plan_key[2] == mode \
+				and (_plan_key[1] as Vector3).distance_to(t) < 0.01 and _same_pose(_plan_key[3]):
+			return
+		if _plan_key.size() == 4 and Time.get_ticks_msec() - _plan_msec < 33:
+			return
+	_plan_key = [facet, t, mode, global_transform]
+	_plan_msec = Time.get_ticks_msec()
 	var snapped := PaperModel.snap_target(facets, facet, g, t)
 	_preview = PaperModel.plan_fold(facets, facet, g, snapped, up_local(), mode)
+	if _preview.ok and _blocked_by_world(_preview):
+		_preview.ok = false
+		_preview.reason = "blocked by the ground or something solid"
 	fold_status = "" if _preview.ok else _preview.reason
 	_build_mesh(_preview.facets if _preview.ok else facets)
 	_show_crease(_preview)
 
 
 func finish_fold(facet: int, g: Vector3, t: Vector3, mode: int = PaperModel.FOLD_NORMAL) -> bool:
-	update_fold(facet, g, t, mode)
+	update_fold(facet, g, t, mode, true) # always plan exactly what was released
 	var ok: bool = _preview.ok
 	if ok:
 		_history.append(PaperModel.clone_all(facets))
 		facets = _preview.facets
 	fold_owner = null
 	_preview = {}
+	_plan_key = []
 	fold_status = ""
 	_refresh()
 	if ok:
@@ -145,23 +165,79 @@ func finish_fold(facet: int, g: Vector3, t: Vector3, mode: int = PaperModel.FOLD
 func cancel_fold() -> void:
 	fold_owner = null
 	_preview = {}
+	_plan_key = []
 	fold_status = ""
 	_refresh()
 
 
+func can_undo() -> bool:
+	return not _history.is_empty()
+
+
+## Unfolds the last fold, unless the paper has no room to swing back out
+## (e.g. the sheet now rests where the old flap would go).
 func undo() -> bool:
 	if is_busy() or _history.is_empty():
 		return false
+	var restored: Array = _history.back()
+	if _blocked_by_world({"moved": restored, "swept": false}):
+		return false
 	facets = _history.pop_back()
 	_refresh()
-	folded.emit()
 	return true
+
+
+## True if the sheet has barely moved since `xf` (a resting body jitters a little).
+func _same_pose(xf: Transform3D) -> bool:
+	var now := global_transform
+	return now.origin.distance_to(xf.origin) < 0.005 and now.basis.x.dot(xf.basis.x) > 0.99999 \
+		and now.basis.z.dot(xf.basis.z) > 0.99999
+
+
+## Would the paper that moves in `plan` hit anything solid (the ground, the
+## ledge, another sheet)? Normal folds are checked along their swing, so you
+## can't fold a flap down through the floor; players don't block folds.
+func _blocked_by_world(plan: Dictionary, pose: Transform3D = global_transform) -> bool:
+	if not is_inside_tree():
+		return false
+	var space := get_world_3d().direct_space_state
+	var query := PhysicsShapeQueryParameters3D.new()
+	query.exclude = [get_rid()]
+	query.collision_mask = collision_mask
+	query.transform = pose
+	var samples := [0.25, 0.5, 0.75, 1.0] if plan.swept else [1.0]
+	for s in samples:
+		var back := Transform3D.IDENTITY
+		if plan.swept:
+			var rot := Basis(plan.axis_d, plan.theta * (s - 1.0))
+			back = Transform3D(rot, plan.axis_a - rot * plan.axis_a)
+		for item in plan.moved:
+			query.shape = _probe(item, back)
+			for hit in space.intersect_shape(query, 4):
+				if not (hit.collider is CharacterBody3D):
+					return true
+	return false
+
+
+## A thin, slightly shrunk copy of a facet's mid-surface for overlap tests, so
+## paper resting on the ground or touching at its hinge doesn't count as a hit.
+func _probe(f: PaperModel.Facet, back: Transform3D) -> ConvexPolygonShape3D:
+	var n := back.basis * f.normal() * 0.005
+	var pts := PackedVector3Array()
+	for p in PaperGeometry.inset(f.pts, 0.05):
+		var q := back * f.at(p)
+		pts.append(q + n)
+		pts.append(q - n)
+	var shape := ConvexPolygonShape3D.new()
+	shape.points = pts
+	return shape
 
 
 # --- Whole-sheet moves -------------------------------------------------------
 
 ## Flips the sheet over about a horizontal world axis, keeping it resting at
 ## the same height.
+## Both are refused if the paper would end up inside something solid.
 func flip(axis_world: Vector3) -> void:
 	_rotate_about_center(Basis(axis_world.normalized(), PI))
 
@@ -182,6 +258,8 @@ func _rotate_about_center(rot: Basis) -> void:
 	for p in _all_points():
 		low_after = minf(low_after, (target * p).y)
 	target.origin.y += low_before - low_after
+	if _blocked_by_world({"moved": facets, "swept": false}, target):
+		return # no room to turn/flip here
 	freeze_mode = RigidBody3D.FREEZE_MODE_KINEMATIC
 	freeze = true
 	_tween_from = global_transform
@@ -199,6 +277,8 @@ func _physics_process(delta: float) -> void:
 			linear_velocity = Vector3.ZERO
 			angular_velocity = Vector3.ZERO
 	elif global_position.y < LOST_Y:
+		if fold_owner != null:
+			cancel_fold()
 		_respawn = true
 		sleeping = false
 
@@ -211,6 +291,8 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 		state.angular_velocity = Vector3.ZERO
 		return
 	var v := state.linear_velocity
+	if _push_velocity != null and state.get_contact_count() == 0:
+		_push_velocity = null # can't steer a sheet that's in free fall
 	if _push_velocity != null:
 		# Drive the slide directly (it overrides friction, riders and all) while
 		# gravity keeps acting on y, so a sheet pushed off an edge still falls.
@@ -252,7 +334,11 @@ func _all_points() -> Array:
 func nearest_handle(from_world: Vector3, radius: float):
 	var best = null
 	var best_d := radius
-	for h in PaperModel.handles(facets, _offsets, up_local()):
+	var up := up_local()
+	if _handles_up.dot(up) < 0.999:
+		_handles = PaperModel.handles(facets, _offsets, up)
+		_handles_up = up
+	for h in _handles:
 		var w := to_global(h.shown)
 		var d := w.distance_to(from_world)
 		if d < best_d:
@@ -265,6 +351,7 @@ func nearest_handle(from_world: Vector3, radius: float):
 
 func _refresh() -> void:
 	_offsets = PaperModel.stack_offsets(facets)
+	_handles_up = Vector3.ZERO # grab points need rebuilding
 	_build_mesh(facets)
 	_rebuild_collision()
 	_update_mass()

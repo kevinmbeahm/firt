@@ -133,9 +133,13 @@ static func snap_target(src: Array, gi: int, g: Vector3, t: Vector3) -> Vector3:
 ## `t`. The crease is where the paper must bend for g to land exactly on t: the
 ## line where the grabbed facet's plane meets the perpendicular bisector of g-t.
 ## Reverse folds are always flat, so they only use t's in-plane position.
-## Returns {ok, reason, facets, axis_a, axis_d, plane_n}.
+## Returns {ok, reason, facets, axis_a, axis_d, plane_n, theta, moved, swept}:
+## `moved` lists the facets (in `facets`) that rotated, and `swept` says they got
+## there by turning `theta` about the crease (normal folds), so the caller can
+## test that path against the world.
 static func plan_fold(src: Array, gi: int, g: Vector3, t: Vector3, up: Vector3, mode: int = FOLD_NORMAL) -> Dictionary:
-	var res := {"ok": false, "reason": "", "facets": [], "axis_a": g, "axis_d": Vector3.ZERO, "plane_n": Vector3.UP}
+	var res := {"ok": false, "reason": "", "facets": [], "axis_a": g, "axis_d": Vector3.ZERO,
+		"plane_n": Vector3.UP, "theta": 0.0, "moved": [], "swept": mode == FOLD_NORMAL}
 	var gf: Facet = src[gi]
 	var n := gf.normal()
 	res.plane_n = n
@@ -195,6 +199,18 @@ static func plan_fold(src: Array, gi: int, g: Vector3, t: Vector3, up: Vector3, 
 			var c := f.at(PaperGeometry.centroid(f.pts))
 			pieces.append({"f": f.clone(), "side": signf(cut_n.dot(c - a)), "src": i})
 
+	# Paper-space hinges between pieces: [neighbour, shared segment].
+	var adj: Array = []
+	adj.resize(pieces.size())
+	for i in pieces.size():
+		adj[i] = []
+	for i in pieces.size():
+		for j in range(i + 1, pieces.size()):
+			var seg := shared_edge(pieces[i].f.pts, pieces[j].f.pts)
+			if not seg.is_empty():
+				adj[i].append([j, seg])
+				adj[j].append([i, seg])
+
 	# Grow the moving set from the grabbed piece through paper-space hinges.
 	var start := -1
 	for i in pieces.size():
@@ -207,15 +223,14 @@ static func plan_fold(src: Array, gi: int, g: Vector3, t: Vector3, up: Vector3, 
 	var queue := [start]
 	while not queue.is_empty():
 		var cur: int = queue.pop_back()
-		for j in pieces.size():
+		var cf: Facet = pieces[cur].f
+		for link in adj[cur]:
+			var j: int = link[0]
 			if moving.has(j) or pieces[j].side != moving_sign:
-				continue
-			var seg := shared_edge(pieces[cur].f.pts, pieces[j].f.pts)
-			if seg.is_empty():
 				continue
 			# A hinge lying on the crease is what we rotate about: a flap already
 			# folded back over it stays behind rather than coming along.
-			var cf: Facet = pieces[cur].f
+			var seg: PackedVector2Array = link[1]
 			if _line_dist(cf.at(seg[0]), a, axis) < TEAR_TOL and _line_dist(cf.at(seg[1]), a, axis) < TEAR_TOL:
 				continue
 			moving[j] = true
@@ -227,13 +242,11 @@ static func plan_fold(src: Array, gi: int, g: Vector3, t: Vector3, up: Vector3, 
 	# Every hinge between moving and resting paper must lie on the crease.
 	for i in moving:
 		var mf: Facet = pieces[i].f
-		for j in pieces.size():
-			if moving.has(j):
+		for link in adj[i]:
+			if moving.has(link[0]):
 				continue
-			var seg := shared_edge(mf.pts, pieces[j].f.pts)
-			for p in seg:
-				var off := mf.at(p) - a
-				if (off - axis * off.dot(axis)).length() > TEAR_TOL:
+			for p in link[1]:
+				if _line_dist(mf.at(p), a, axis) > TEAR_TOL:
 					res.reason = "would tear the paper"
 					return res
 
@@ -258,21 +271,100 @@ static func plan_fold(src: Array, gi: int, g: Vector3, t: Vector3, up: Vector3, 
 	var lands_above := cn.dot(Basis(axis, theta * 0.5) * vg) >= 0.0
 	var reversed := (rot * cn).dot(canonical(rot * cn)) < 0.0
 	var out: Array = []
+	var moved: Array = []
+	var placed := {} # piece index -> facet in `out`
 	for i in pieces.size():
 		var f: Facet = pieces[i].f
 		if moving.has(i):
 			var rank := (mtop - f.layer) if reversed else (f.layer - mbottom)
 			var l := (top + 1 + rank) if lands_above else (bottom - 1 - (mtop - mbottom) + rank)
-			out.append(Facet.new(f.pts, spin * f.xf, l))
+			var nf := Facet.new(f.pts, (spin * f.xf).orthonormalized(), l)
+			out.append(nf)
+			moved.append(nf)
+			placed[i] = nf
 		else:
 			out.append(f)
+			placed[i] = f
+	# Paper can't end up passing through other paper (hinged neighbours touch
+	# along their shared edge, which is fine).
+	for i in moving:
+		var hinged := {}
+		for link in adj[i]:
+			hinged[link[0]] = true
+		for j in pieces.size():
+			if moving.has(j) or hinged.has(j):
+				continue
+			var m: Facet = placed[i]
+			var st: Facet = placed[j]
+			if not _coplanar(m, st) and (_crosses(m, st) or _crosses(st, m)):
+				res.reason = "would pass through other paper"
+				return res
 	out.sort_custom(func(x: Facet, y: Facet) -> bool: return x.layer < y.layer)
 	for i in out.size():
 		(out[i] as Facet).layer = i
-		(out[i] as Facet).xf = (out[i] as Facet).xf.orthonormalized()
 	res.ok = true
 	res.facets = out
+	res.moved = moved
+	res.theta = theta
 	return res
+
+
+## True when non-coplanar facets `a` and `b` cut through each other: the line
+## where `a` crosses b's plane runs through the inside of `b`.
+static func _crosses(a: Facet, b: Facet) -> bool:
+	var nb := b.normal()
+	var ob := b.xf.origin
+	var hits: Array = []
+	var c := a.pts.size()
+	for i in c:
+		var p := a.at(a.pts[i])
+		var q := a.at(a.pts[(i + 1) % c])
+		var dp := nb.dot(p - ob)
+		var dq := nb.dot(q - ob)
+		if absf(dp) < 1e-4:
+			hits.append(p)
+		elif dp * dq < 0.0 and absf(dq) >= 1e-4:
+			hits.append(p + (q - p) * (dp / (dp - dq)))
+	if hits.size() < 2:
+		return false
+	# The two hits furthest apart bound a's slice through b's plane.
+	var p0: Vector3 = hits[0]
+	var p1: Vector3 = hits[1]
+	for h in hits:
+		if (h as Vector3).distance_to(p0) > p1.distance_to(p0):
+			p1 = h
+	var inv := b.xf.affine_inverse()
+	var s0: Vector3 = inv * p0
+	var s1: Vector3 = inv * p1
+	return _segment_inside(Vector2(s0.x, s0.y), Vector2(s1.x, s1.y), PaperGeometry.inset(b.pts, 0.01)) > 0.02
+
+
+## Length of the part of segment p-q inside a convex polygon (Cyrus-Beck).
+static func _segment_inside(p: Vector2, q: Vector2, poly: PackedVector2Array) -> float:
+	var cen := PaperGeometry.centroid(poly)
+	var t0 := 0.0
+	var t1 := 1.0
+	var d := q - p
+	for i in poly.size():
+		var e0 := poly[i]
+		var e1 := poly[(i + 1) % poly.size()]
+		var n := Vector2(-(e1 - e0).y, (e1 - e0).x)
+		if n.dot(cen - e0) < 0.0:
+			n = -n
+		var num := n.dot(p - e0)
+		var den := n.dot(d)
+		if absf(den) < 1e-9:
+			if num < 0.0:
+				return 0.0
+			continue
+		var t := -num / den
+		if den > 0.0:
+			t0 = maxf(t0, t)
+		else:
+			t1 = minf(t1, t)
+		if t0 >= t1:
+			return 0.0
+	return (t1 - t0) * d.length()
 
 
 ## An edge in the grabbed plane lying almost on the proposed crease, as
@@ -379,6 +471,7 @@ static func _finish_reverse(res: Dictionary, pieces: Array, moving: Dictionary, 
 	var spin_up := _flat_spin(a, axis, vg, cn, 1.0)
 	var spin_down := _flat_spin(a, axis, vg, cn, -1.0)
 	var keyed: Array = []
+	var moved: Array = []
 	for i in pieces.size():
 		var f: Facet = pieces[i].f
 		var key := float(f.layer)
@@ -395,7 +488,10 @@ static func _finish_reverse(res: Dictionary, pieces: Array, moving: Dictionary, 
 				key = lmax + 0.05 + 0.4 * (lmax - f.layer) / (lmax - lmin + 1.0)
 			else:
 				key = bottom - 0.05 - 0.4 * (f.layer - lmin) / (lmax - lmin + 1.0)
-		keyed.append([key, Facet.new(f.pts, xf, 0)])
+		var nf := Facet.new(f.pts, xf, 0)
+		keyed.append([key, nf])
+		if moving.has(i):
+			moved.append(nf)
 	keyed.sort_custom(func(x: Array, y: Array) -> bool: return x[0] < y[0])
 	var out: Array = []
 	for i in keyed.size():
@@ -405,6 +501,8 @@ static func _finish_reverse(res: Dictionary, pieces: Array, moving: Dictionary, 
 		out.append(f)
 	res.ok = true
 	res.facets = out
+	res.moved = moved
+	res.theta = PI
 	return res
 
 
@@ -457,47 +555,60 @@ static func shared_edge(a: PackedVector2Array, b: PackedVector2Array) -> PackedV
 ## Per-facet offsets that lift overlapping coplanar layers apart by LAYER_GAP,
 ## in stacking order, so thin paper never z-fights or interpenetrates.
 static func stack_offsets(list: Array) -> Array:
+	var count := list.size()
 	var offsets: Array = []
-	offsets.resize(list.size())
+	offsets.resize(count)
 	var elev: Array = []
-	elev.resize(list.size())
-	var order := range(list.size())
+	elev.resize(count)
+	var order := range(count)
 	order.sort_custom(func(i: int, j: int) -> bool: return list[i].layer < list[j].layer)
-	var projected := {}
-	for idx in order.size():
-		var i: int = order[idx]
+	# Each facet projected into its plane's 2D frame, plus a bounding box for
+	# cheap rejection before the exact polygon overlap.
+	var flat: Array = []
+	var boxes: Array = []
+	var normals: Array = []
+	for i in count:
 		var f: Facet = list[i]
 		var cn := canonical(f.normal())
+		var u := cn.cross(Vector3.UP if absf(cn.y) < 0.9 else Vector3.RIGHT).normalized()
+		var v := cn.cross(u)
+		var poly := PackedVector2Array()
+		var box := Rect2()
+		for k in f.pts.size():
+			var q := f.at(f.pts[k])
+			var p2 := Vector2(q.dot(u), q.dot(v))
+			poly.append(p2)
+			box = Rect2(p2, Vector2.ZERO) if k == 0 else box.expand(p2)
+		flat.append(poly)
+		boxes.append(box)
+		normals.append(cn)
+	for idx in count:
+		var i: int = order[idx]
+		var f: Facet = list[i]
 		var e := 0
 		for jdx in idx:
 			var j: int = order[jdx]
-			var other: Facet = list[j]
-			if not _coplanar(f, other):
+			if elev[j] + 1 <= e or not _coplanar(f, list[j]):
 				continue
-			if PaperGeometry.overlap_area(_project(f, cn, projected, i), _project(other, cn, projected, j)) > 0.01:
-				e = maxi(e, elev[j] + 1)
+			if not (boxes[i] as Rect2).grow(-0.01).intersects(boxes[j]):
+				continue
+			if PaperGeometry.overlap_area(flat[i], flat[j]) > 0.01:
+				e = elev[j] + 1
 		elev[i] = e
-		offsets[i] = cn * (e * LAYER_GAP)
+		offsets[i] = normals[i] * (e * LAYER_GAP)
 	return offsets
 
 
-static func _project(f: Facet, cn: Vector3, cache: Dictionary, key: int) -> PackedVector2Array:
-	var k := "%d:%s" % [key, cn]
-	if cache.has(k):
-		return cache[k]
-	var u := cn.cross(Vector3.UP if absf(cn.y) < 0.9 else Vector3.RIGHT).normalized()
-	var v := cn.cross(u)
-	var out := PackedVector2Array()
-	for p in f.pts:
-		var q := f.at(p)
-		out.append(Vector2(q.dot(u), q.dot(v)))
-	cache[k] = out
-	return out
-
-
 ## Grabbable corners and edge midpoints, one per spot (the layer nearest `up`
-## wins). Returns Array of {local: Vector3 (mid-surface), shown: Vector3, facet: int}.
+## wins). Points buried under a layer stacked above them (as seen from `up`)
+## can't be grabbed: you'd have to pull them out through the paper on top.
+## Returns Array of {local: Vector3 (mid-surface), shown: Vector3, facet: int}.
 static func handles(list: Array, offsets: Array, up: Vector3) -> Array:
+	var inverse: Array = []
+	var inner: Array = []
+	for f in list:
+		inverse.append((f as Facet).xf.affine_inverse())
+		inner.append(PaperGeometry.inset((f as Facet).pts, 0.05))
 	var out: Array = []
 	for i in list.size():
 		var f: Facet = list[i]
@@ -506,6 +617,8 @@ static func handles(list: Array, offsets: Array, up: Vector3) -> Array:
 			for p in [f.pts[k], (f.pts[k] + f.pts[(k + 1) % c]) * 0.5]:
 				var local := f.at(p)
 				var shown: Vector3 = local + offsets[i]
+				if _buried(list, offsets, inverse, inner, i, local, up):
+					continue
 				var merged := false
 				for h in out:
 					if (h.shown as Vector3).distance_to(shown) < 0.25:
@@ -518,3 +631,16 @@ static func handles(list: Array, offsets: Array, up: Vector3) -> Array:
 				if not merged:
 					out.append({"local": local, "shown": shown, "facet": i})
 	return out
+
+
+static func _buried(list: Array, offsets: Array, inverse: Array, inner: Array, i: int, point: Vector3, up: Vector3) -> bool:
+	var f: Facet = list[i]
+	for j in list.size():
+		if j == i or (offsets[j] - offsets[i]).dot(up) <= 1e-4:
+			continue # not stacked above us
+		if not _coplanar(f, list[j]):
+			continue
+		var q: Vector3 = inverse[j] * point
+		if Geometry2D.is_point_in_polygon(Vector2(q.x, q.y), inner[j]):
+			return true
+	return false

@@ -36,8 +36,8 @@ func _ready() -> void:
 	_build_environment()
 	_build_terrain()
 
-	sheet = _add_sheet(PUZZLE_SIZE, PUZZLE_START)
-	_add_sheet(SANDBOX_SIZE, SANDBOX_START).rotation.y = PI * 0.5
+	sheet = _add_sheet(PUZZLE_SIZE, PUZZLE_START, 0.0)
+	_add_sheet(SANDBOX_SIZE, SANDBOX_START, PI * 0.5)
 
 	var colors := [Color(0.95, 0.4, 0.35), Color(0.35, 0.62, 0.95)]
 	for i in 2:
@@ -67,10 +67,11 @@ func _ready() -> void:
 	_update_camera(1.0)
 
 
-func _add_sheet(size: Vector2, pos: Vector3) -> PaperSheet:
+func _add_sheet(size: Vector2, pos: Vector3, yaw: float) -> PaperSheet:
 	var s := PaperSheet.new()
 	s.setup(size)
 	s.position = pos
+	s.rotation.y = yaw # before entering the tree, so it's part of the spawn transform
 	add_child(s)
 	s.folded.connect(func() -> void: _undo_order.append(s))
 	sheets.append(s)
@@ -193,8 +194,8 @@ func sheet_near(p: Node3D) -> PaperSheet:
 		var box: AABB = s.world_box()
 		box.position += s.global_position
 		var q := p.global_position
-		var closest := Vector3(
-			clampf(q.x, box.position.x, box.end.x), q.y, clampf(q.z, box.position.z, box.end.z))
+		var closest := Vector3(clampf(q.x, box.position.x, box.end.x),
+			clampf(q.y, box.position.y - 2.0, box.end.y + 0.5), clampf(q.z, box.position.z, box.end.z))
 		var d := closest.distance_to(q)
 		if d < best_d:
 			best = s
@@ -204,10 +205,13 @@ func sheet_near(p: Node3D) -> PaperSheet:
 
 func undo() -> void:
 	while not _undo_order.is_empty():
-		var s: PaperSheet = _undo_order.pop_back()
+		var s: PaperSheet = _undo_order.back()
+		if not s.can_undo():
+			_undo_order.pop_back() # nothing left there (e.g. the sheet was reset)
+			continue
 		if s.undo():
-			_undo_order.pop_back() # undo() re-emits `folded`; drop that entry
-			return
+			_undo_order.pop_back()
+		return # refused (busy, or no room to unfold): keep it for later
 
 
 func _process(delta: float) -> void:

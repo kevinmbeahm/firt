@@ -63,3 +63,13 @@ static func _clean(poly: PackedVector2Array) -> PackedVector2Array:
 	if out.size() < 3 or absf(signed_area(out)) < MIN_AREA:
 		return PackedVector2Array()
 	return out
+
+
+## The polygon pulled in toward its centroid by `d` (convex polygons only).
+static func inset(poly: PackedVector2Array, d: float) -> PackedVector2Array:
+	var c := centroid(poly)
+	var out := PackedVector2Array()
+	for p in poly:
+		var to_c := c - p
+		out.append(p + to_c.normalized() * minf(d, to_c.length() * 0.5))
+	return out
