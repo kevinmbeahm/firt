@@ -221,9 +221,10 @@ a difficulty rating from 1 to 5.
 - **Solution (house):** fold the two top corners down along the printed roof
   lines while the sheet is still flat (the top is out of reach once it stands
   up), then stand it up the same way.
-- **Co-op:** one player holds the standing flap at 90° (holding a grab keeps
-  the fold live) while the other nudges the sheet sideways to line it up with
-  the outline. Solo: hold the flap, swap characters, nudge.
+- **Co-op:** one player folds and stands the paper up while the other lines
+  the sheet up with the outline and slides it in (a sheet can't be slid while
+  someone's mid-fold, so it's fold, then slide). In the house room the second
+  player can spot the roof corners from the far side.
 - **Series:** square, house, then later an arrowhead, a diamond (turn 45°
   first), and a crane outline as an end-game challenge. Shapes that need cuts,
   like a star, are out.
@@ -523,7 +524,7 @@ with an earlier mechanic, then a "free" room with several valid solutions.
 | Rooms: one level made of puzzle rooms, with restart per room, checkpoints and room-local goals | built |
 | Solo character swap | built |
 | S1 printed creases | built |
-| S2 shape gates (profile mode) | built |
+| S2 shape gates (profile mode; fit-box and footprint modes not yet) | built |
 | P1 Ramp (room 1) | built |
 | P3 Doorway: square, house | built |
 | Everything else | not started |

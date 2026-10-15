@@ -17,7 +17,9 @@ Open this folder in Godot 4.3+ and press **F5** (main scene: `scenes/main.tscn`)
 | Sheet handling (hold) | **R** or **RMB**: move = slide, Space = flip over, F/LMB = turn 45 deg | **,** (same combos) |
 
 Gamepads (device 0 = P1, device 1 = P2): left stick move, A jump/raise, B lower, X grab, Y fold type, RB sheet handling.
-Shared camera: mouse / right stick / Q-E to orbit. **Z** undo last fold, **Backspace** restart, **Esc** release mouse, **F11** (or Alt+Enter) fullscreen. The view stretches to fill any window size.
+Shared camera: mouse / right stick / Q-E to orbit. **Z** undo last fold, **Backspace** restart the room, **Page Up / Page Down** previous / next room, **Esc** release mouse, **F11** (or Alt+Enter) fullscreen. The view stretches to fill any window size.
+
+**Solo play:** **V** (or LB on P1's pad) swaps which bean you control. The bean you leave stands still but keeps holding whatever it was holding (and keeps its weight on the paper), so you can hold a flap up with one bean and do something else with the other. Swap back and the first bean keeps holding until you press grab (then letting go creases the fold). In two-player games, bean 2 goes back to P2 when P1 swaps back.
 
 ## How folding works
 The paper is thin (3 cm) and folds like real paper, rigidly, at any angle:
@@ -31,7 +33,9 @@ The paper is thin (3 cm) and folds like real paper, rigidly, at any angle:
 - **Reverse folds** (Tab / ' / Y while holding paper): on a folded edge (layers joined at a spine, e.g. a strip folded in half), the two sides of the tip swing about the same crease in opposite directions. An *inside reverse fold* tucks the tip between the layers (a crane's neck and tail); an *outside reverse fold* wraps it around them. They need a folded edge and are always flat.
 - **Collapse (squash / petal folds)**: the fourth fold type. Precrease first (fold and unfold), then grab a point and collapse: every existing crease may fold or unfold together, as long as the result is flat-foldable (Kawasaki's theorem at every crease vertex) and nothing tears. That's how you make a square base from a precreased square, or a petal fold on a kite. When the creases allow several collapses (square base vs waterbomb, say), raise/lower your hands to step through them; the HUD shows "option i of n". The simplest one that brings the grabbed point closest to your hands comes first.
 - **Layering**: every flat fold's stacking order comes from a layer solver (the taco/tortilla rules plus transitivity), so a fold that would need paper to pass through paper is refused rather than faked.
-- Hold *sheet handling* to slide the whole sheet (riders are carried; if you're not on it you walk alongside), flip it over (to fold the other side) or turn it.
+- **Printed creases**: some sheets come with crease lines printed on them (blue: fold toward you, red: fold away, as seen from the cream side). A fold close to a printed line (or to any crease made before) folds exactly along it; the bigger the flap, the more forgiving the aim, since you can't lift the far edge of a 4 m flap 4 m up.
+- A sheet holds still while someone's folding it (you can't slide it then either), so walking onto it with a corner in your hands doesn't shove it.
+- Hold *sheet handling* to slide the whole sheet (riders are carried; if you're not on it you walk alongside; sliding doesn't spin it), flip it over (to fold the other side) or turn it.
 
 ## Paper physics
 Each sheet is a rigid body with real weight (mass from its area; centre of mass recomputed after every fold):
@@ -40,18 +44,21 @@ Each sheet is a rigid body with real weight (mass from its area; centre of mass 
 - A sheet lost in the void comes back at its starting spot (with its folds).
 - You can only slide a sheet that's resting on something (no steering it in mid-fall). Flips, turns and undos are refused when the paper would end up inside something solid.
 
-## Level 1
-Get both players to the flag on the 2.2 m ledge across a 7 m gap; too high to jump, too far to just slide the sheet across (it would tip into the void). Fold part of the big sheet up into a **ramp**, ride the sheet out until the ramp's tip reaches over the ledge so it's held up at both ends, and walk up.
-(Hint: whatever you stand on when you fold the far strip up comes up too.)
-The smaller sheet on the island is a free-folding sandbox: try a paper plane, or fold a strip in half and reverse-fold its tip.
+## Rooms
+The game is a series of puzzle rooms, one at a time; solving a room (both beans at its flag) moves you on to the next after a few seconds. The room's name, hint and progress show at the bottom of the screen. Puzzle designs for future rooms are in [docs/puzzle_design.md](docs/puzzle_design.md).
+
+1. **The Ramp.** Get both players to the flag on the 2.2 m ledge across a 7 m gap; too high to jump, too far to just slide the sheet across (it would tip into the void). Fold part of the big sheet up into a **ramp**, ride the sheet out until the ramp's tip reaches over the ledge so it's held up at both ends, and walk up. (Hint: whatever you stand on when you fold the far strip up comes up too.) The smaller sheet on the island is a free-folding sandbox: try a paper plane, or fold a strip in half and reverse-fold its tip.
+2. **Doorway: Square.** A glowing square is painted on a wall next to a locked door. Stand paper up against the wall so it fills the square (at least 90% covered, no more than 10% spilling outside) and the door opens. Fold the sheet in half on its printed line, stand half of it up on the other line, then slide it into place.
+3. **Doorway: House.** The same with a house shape. Fold the roof corners down while the paper's flat (they're out of reach once it stands up), then stand it up and slide it in.
 
 ## Tests
 - `godot --headless -s tests/fold_model.gd` folds a paper plane step by step and checks layer-selective folds, partial angles, crease reuse, tear refusal, and inside/outside reverse folds.
 - `godot --headless -s tests/fold_physics.gd` checks folds against the world and the rigid body: flat folds near the floor go over the top, flaps rest on the ground instead of passing through it, hanging flaps over the void, no paper through paper, buried corners, undo/turn needing room, no steering falling sheets, clean grab release, respawn orientation.
 - `godot --headless -s tests/unfold_game.gd` folds a strip over with real inputs, then walks the flap back sloppily and checks it unfolds along the old crease.
 - `godot --headless -s tests/paper_physics.gd` checks sheets rest, tip into the void when pushed over an edge, respawn, and tip under the players' weight.
-- `godot --headless -s tests/solve_level.gd` has bots solve level 1 with real input actions (fold a ramp, ride the sheet out to the ledge, climb) and asserts the win condition.
-
+- `godot --headless -s tests/solve_level.gd` has bots solve room 1 (the Ramp) with real input actions (fold a ramp, ride the sheet out to the ledge, climb) and asserts the win condition.
+- `godot --headless -s tests/solve_doorways.gd` has bots solve both Doorway rooms with real input actions (fold on the printed lines, stand the paper up, slide it against the wall, walk through the door), and checks that paper spilling past the outline keeps the door shut.
+- `godot --headless -s tests/solo_swap.gd` plays solo with real inputs: lift a flap with one bean, swap, walk the other bean while the first keeps holding, swap back and crease it.
 - `godot --headless -s tests/crane.gd` is the **benchmark**: it folds a traditional paper crane from an 8 m square in 32 steps with the game's own operations (precreases, square-base collapse, kite folds, petal folds, leg narrowing, inside reverse folds for a long neck and tail and a bent head, wing folds). After every step it checks the whole sheet: no tears, no paper through paper, no paper lost, a valid stacking. Then it checks the crane's shape: neck and tail rise well above the spread wings on opposite sides, and the head bends down off the neck. It prints a step table (about 150 facets, under 2 s of planning in total). `godot -s tests/crane.gd -- --shots=DIR` renders the finished crane from the side, three-quarters and above to `DIR` (needs a display).
 
 ## Code layout
@@ -60,7 +67,9 @@ The smaller sheet on the island is a free-folding sandbox: try a paper plane, or
 - `scripts/paper_layers.gd` - layer-order solver for flat-folded stacks (taco/tortilla constraints, transitivity, search)
 - `scripts/paper_sheet.gd` - a sheet in the world (`RigidBody3D`): mass/centre of mass from the paper, sliding, respawn, live fold preview, undo, flip/turn, thin-slab meshes and collision
 - `scripts/player.gd` - `CharacterBody3D` bean: movement, step-up, grab/fold input, procedural wobble and arm reaching
-- `scripts/level.gd` - terrain, lighting, sheets, shared orbit camera, input map, sheet sliding, win condition
+- `scripts/level.gd` - hosts the rooms: loads them in order, players and solo swap, lighting, shared orbit camera, HUD, input map, undo
+- `scripts/room.gd` - base class for a puzzle room (terrain, sheets, goal, checkpoints, doors), with the rooms in `scripts/rooms/`
+- `scripts/shape_gate.gd` - an outline on a wall that opens when paper standing against it fills the shape
 
 ## Known limits / next steps
 - Crane benchmark limits (rigid paper only bends at creases): narrowing the legs also folds a small gusset into the layers above each leg, so the wings hinge where those gussets end, a little higher than a hand-folded crane's (wings 2.6 m long rather than 4 m). And a real crane puffs out its body as the wings open; here the body stays flat and the wings stand square to it.
@@ -68,3 +77,4 @@ The smaller sheet on the island is a free-folding sandbox: try a paper plane, or
 - Fold collision checks the folded result (and, for ordinary folds, the flap's swing) against the world, but checks paper-against-paper only for the final position, so a flap can still swing through other paper on its way to a valid spot.
 - Flip turns a sheet 180 deg; there's no free 3D rotation yet (e.g. to stand a finished plane upright, or throw it).
 - Local co-op only, shared camera.
+- Shape gates only have the outline-on-a-wall (profile) mode so far; the fit-box and footprint modes in the design doc aren't built yet.

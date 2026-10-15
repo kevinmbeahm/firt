@@ -92,3 +92,34 @@ static func inset(poly: PackedVector2Array, d: float) -> PackedVector2Array:
 		var to_c := c - p
 		out.append(p + to_c.normalized() * minf(d, to_c.length() * 0.5))
 	return out
+
+
+## The part of segment p-q inside convex polygon `poly`, as [start, end], or
+## empty if it misses (or only touches) it.
+static func clip_segment(p: Vector2, q: Vector2, poly: PackedVector2Array) -> PackedVector2Array:
+	var cen := centroid(poly)
+	var t0 := 0.0
+	var t1 := 1.0
+	var d := q - p
+	for i in poly.size():
+		var e0 := poly[i]
+		var e1 := poly[(i + 1) % poly.size()]
+		var n := Vector2(-(e1 - e0).y, (e1 - e0).x)
+		if n.dot(cen - e0) < 0.0:
+			n = -n
+		var num := n.dot(p - e0)
+		var den := n.dot(d)
+		if absf(den) < 1e-9:
+			if num < -1e-6:
+				return PackedVector2Array()
+			continue
+		var t := -num / den
+		if den > 0.0:
+			t0 = maxf(t0, t)
+		else:
+			t1 = minf(t1, t)
+		if t0 >= t1:
+			return PackedVector2Array()
+	if (t1 - t0) * d.length() < 1e-3:
+		return PackedVector2Array()
+	return PackedVector2Array([p + d * t0, p + d * t1])

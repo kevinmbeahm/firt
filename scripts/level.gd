@@ -9,6 +9,8 @@ extends Node3D
 
 const ROOMS := [
 	preload("res://scripts/rooms/ramp.gd"),
+	preload("res://scripts/rooms/doorway_square.gd"),
+	preload("res://scripts/rooms/doorway_house.gd"),
 ]
 const ADVANCE_DELAY := 3.0 ## seconds between solving a room and loading the next
 
@@ -28,6 +30,7 @@ var _camera: Camera3D
 var _cam_focus := Vector3(-6, 1, 0)
 var _cam_dist := 16.0
 var _hud: Label
+var _room_hud: Label ## room title, hint and progress, at the bottom of the screen
 var _undo_order: Array = [] ## sheets in the order they were folded
 var _advance_in := -1.0
 
@@ -59,6 +62,16 @@ func _ready() -> void:
 	_hud.add_theme_color_override("font_outline_color", Color.BLACK)
 	_hud.add_theme_constant_override("outline_size", 6)
 	layer.add_child(_hud)
+	_room_hud = Label.new()
+	_room_hud.add_theme_font_size_override("font_size", 18)
+	_room_hud.add_theme_color_override("font_outline_color", Color.BLACK)
+	_room_hud.add_theme_constant_override("outline_size", 6)
+	_room_hud.anchor_top = 1.0
+	_room_hud.anchor_bottom = 1.0
+	_room_hud.offset_left = 16
+	_room_hud.offset_top = -110
+	_room_hud.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	layer.add_child(_room_hud)
 
 	var start := 0
 	for a in OS.get_cmdline_user_args():
@@ -303,7 +316,10 @@ func _update_hud() -> void:
 	text += "P2: Arrows  / jump  . grab  ; lower  ' fold type  , sheet     Pads: A jump/raise  B lower  X grab  Y fold type  RB sheet\n"
 	text += "Solo: V / LB swaps which bean you control (the other keeps holding what it holds)\n"
 	text += "Mouse / right stick / Q E: camera   Z: undo fold   Backspace: restart room   PgUp/PgDn: change room   Esc: release mouse   F11: fullscreen\n"
-	text += "\nRoom %d of %d: %s\n%s" % [room_index + 1, ROOMS.size(), room.title, room.hint]
+	var room_text := "Room %d of %d: %s\n%s" % [room_index + 1, ROOMS.size(), room.title, room.hint]
+	var room_status := room.status()
+	if room_status != "":
+		room_text += "\n" + room_status
 	if solo:
 		text += "\nSolo: you're controlling bean %d" % p1_bean().id
 	for p in players:
@@ -311,10 +327,11 @@ func _update_hud() -> void:
 		if st != "":
 			text += "\nP%d %s" % [p.id, st]
 	if all_complete:
-		text += "\n\nALL ROOMS COMPLETE!"
+		room_text += "\nALL ROOMS COMPLETE!"
 	elif complete:
-		text += "\n\nROOM COMPLETE! Next room in %d..." % ceili(maxf(_advance_in, 0.0))
+		room_text += "\nROOM COMPLETE! Next room in %d..." % ceili(maxf(_advance_in, 0.0))
 	_hud.text = text
+	_room_hud.text = room_text
 
 
 # --- Input -------------------------------------------------------------------

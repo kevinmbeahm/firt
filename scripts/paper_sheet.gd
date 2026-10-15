@@ -11,6 +11,9 @@ signal folded ## a fold was committed or undone
 const FRONT_COLOR := Color(0.86, 0.83, 0.74)
 const BACK_COLOR := Color(0.45, 0.65, 0.95)
 const EDGE_COLOR := Color(0.4, 0.37, 0.33)
+const VALLEY_COLOR := Color(0.2, 0.32, 0.75) ## printed crease to fold toward you
+const MOUNTAIN_COLOR := Color(0.78, 0.25, 0.2) ## printed crease to fold away
+const PRINT_WIDTH := 0.1
 const TWEEN_TIME := 0.4
 const AREAL_DENSITY := 0.6 ## kg per square metre of paper (it's giant paper)
 const SLIDE_ACCEL := 12.0
@@ -26,6 +29,7 @@ var fold_status := "" ## why the current drag can't fold, for the HUD
 var _history: Array = []
 var _offsets: Array = []
 var _preview: Dictionary = {}
+var _held_still := false ## frozen for the duration of a fold drag
 var _drag_side := 0 ## which side of its paper the flap being folded is on (+1 above, -1 below, 0 not far over yet)
 var _mesh_instance: MeshInstance3D
 var _crease: MeshInstance3D
@@ -99,6 +103,7 @@ func reset_paper() -> void:
 	facets = PaperModel.make_sheet(paper_size, printed_creases)
 	_history.clear()
 	fold_owner = null
+	_let_go()
 	_preview = {}
 	_refresh()
 
@@ -129,7 +134,22 @@ func begin_fold(owner) -> bool:
 		return false
 	fold_owner = owner
 	_drag_side = 0
+	# Hold the sheet still while it's being folded (it can't be slid then
+	# either): the preview stays put and walking onto it doesn't shove it.
+	_held_still = not freeze
+	if _held_still:
+		freeze_mode = RigidBody3D.FREEZE_MODE_STATIC
+		freeze = true
 	return true
+
+
+## Lets the sheet move again after a fold drag ends.
+func _let_go() -> void:
+	if _held_still:
+		_held_still = false
+		freeze = false
+		linear_velocity = Vector3.ZERO
+		angular_velocity = Vector3.ZERO
 
 
 ## g and t are sheet-local: the grabbed point and where the hands hold it now.
@@ -188,6 +208,7 @@ func finish_fold(facet: int, g: Vector3, t: Vector3, mode: int = PaperModel.FOLD
 		facets = _preview.facets
 		PaperModel.remember_creases(facets)
 	fold_owner = null
+	_let_go()
 	_preview = {}
 	_plan_key = []
 	fold_status = ""
@@ -199,6 +220,7 @@ func finish_fold(facet: int, g: Vector3, t: Vector3, mode: int = PaperModel.FOLD
 
 func cancel_fold() -> void:
 	fold_owner = null
+	_let_go()
 	_preview = {}
 	_plan_key = []
 	fold_status = ""
@@ -390,6 +412,10 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 		# gravity keeps acting on y, so a sheet pushed off an edge still falls.
 		_slide = _slide.move_toward(_push_velocity, SLIDE_ACCEL * state.step)
 		state.linear_velocity = Vector3(_slide.x, v.y, _slide.z)
+		# Sliding doesn't spin it (turning is its own control), though it can
+		# still tip over an edge.
+		var w := state.angular_velocity
+		state.angular_velocity = w - Vector3.UP * w.dot(Vector3.UP)
 		_push_velocity = null
 	else:
 		_slide = Vector3(v.x, 0.0, v.z)
@@ -504,7 +530,29 @@ func _build_mesh(list: Array) -> void:
 	st.set_material(_material)
 	for i in list.size():
 		_add_slab(st, list[i], offsets[i])
+		for c in printed_creases:
+			_add_printed_line(st, list[i], offsets[i], c)
 	_mesh_instance.mesh = st.commit()
+
+
+## A printed crease line where it crosses facet `f`, drawn on both faces just
+## above the paper: blue for valley folds, red for mountain folds (as seen from
+## the cream front; the back shows the opposite colour, as real paper would).
+func _add_printed_line(st: SurfaceTool, f: PaperModel.Facet, offset: Vector3, c: Dictionary) -> void:
+	var seg := PaperGeometry.clip_segment(c.a, c.b, f.pts)
+	if seg.is_empty():
+		return
+	var n := f.normal()
+	var along: Vector2 = (seg[1] - seg[0]).normalized()
+	var side := f.xf.basis * Vector3(-along.y, along.x, 0.0).normalized() * (PRINT_WIDTH * 0.5)
+	var valley: bool = int(c.get("mv", 1)) > 0
+	for face in [1.0, -1.0]:
+		var lift: Vector3 = n * face * (PaperModel.THICKNESS * 0.5 + 0.004)
+		var p0: Vector3 = f.at(seg[0]) + offset + lift
+		var p1: Vector3 = f.at(seg[1]) + offset + lift
+		var col := VALLEY_COLOR if valley == (face > 0.0) else MOUNTAIN_COLOR
+		_tri(st, p0 - side, p0 + side, p1 + side, n * face, col)
+		_tri(st, p0 - side, p1 + side, p1 - side, n * face, col)
 
 
 ## A thin slab: cream on the paper's front, blue on its back.

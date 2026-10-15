@@ -44,6 +44,8 @@ var _hands: Array = []
 var _legs: Array = []
 var _marker: MeshInstance3D
 var _pointer: MeshInstance3D
+var _body_shape: CollisionShape3D
+var _ghost_frames := 0 ## collision stays off this many more physics frames after a teleport
 var _phase := 0.0
 var _tilt := Vector2.ZERO
 var _tilt_vel := Vector2.ZERO
@@ -92,13 +94,13 @@ func _ready() -> void:
 	floor_snap_length = STEP_HEIGHT + 0.1
 	floor_max_angle = deg_to_rad(50.0)
 
-	var col := CollisionShape3D.new()
+	_body_shape = CollisionShape3D.new()
 	var cap := CapsuleShape3D.new()
 	cap.radius = 0.4
 	cap.height = 1.8
-	col.shape = cap
-	col.position.y = 0.9
-	add_child(col)
+	_body_shape.shape = cap
+	_body_shape.position.y = 0.9
+	add_child(_body_shape)
 
 	_build_visuals()
 
@@ -220,8 +222,7 @@ func _mat(c: Color) -> StandardMaterial3D:
 
 func respawn() -> void:
 	release()
-	global_position = spawn
-	velocity = Vector3.ZERO
+	_teleport(spawn)
 
 
 ## Lets go of anything held (the fold in progress is dropped).
@@ -239,6 +240,14 @@ func release() -> void:
 func place(pos: Vector3) -> void:
 	release()
 	spawn = pos
+	_teleport(pos)
+
+
+## Moves the bean without it counting as a very fast movement (which would
+## fling any paper it was standing on): its collision is off for a moment.
+func _teleport(pos: Vector3) -> void:
+	_body_shape.disabled = true
+	_ghost_frames = 2
 	global_position = pos
 	velocity = Vector3.ZERO
 	_floor_body = null
@@ -247,6 +256,10 @@ func place(pos: Vector3) -> void:
 # --- Physics -----------------------------------------------------------------
 
 func _physics_process(delta: float) -> void:
+	if _ghost_frames > 0:
+		_ghost_frames -= 1
+		if _ghost_frames == 0:
+			_body_shape.disabled = false
 	var input := _stick()
 	var wish: Vector3 = level.camera_basis() * Vector3(input.x, 0.0, input.y)
 
@@ -318,7 +331,7 @@ func _press_on_paper() -> void:
 	var hit := get_world_3d().direct_space_state.intersect_ray(q)
 	_floor_body = hit.get("collider")
 	var body := _floor_body as RigidBody3D
-	if body != null:
+	if body != null and not body.freeze: # (a frozen body would bank the force and release it all at once)
 		body.sleeping = false
 		body.apply_force(Vector3.DOWN * WEIGHT, hit.position - body.global_position)
 

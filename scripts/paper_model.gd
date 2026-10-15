@@ -23,6 +23,8 @@ const MIN_ANGLE := deg_to_rad(4.0)
 const VERTEX_SNAP := 0.6
 const EDGE_SNAP := 0.35
 const CREASE_SNAP := 0.15
+const MEMORY_SNAP := 0.25 ## a new crease this close to a remembered or printed one folds along it...
+const MEMORY_SNAP_SHARE := 0.2 ## ...or this share of the flap's size, if that's more
 const SLIVER_AREA := 0.001 ## square metres: a crease shaving off less than this from a facet just misses it
 const VERTEX_AXIS_SNAP := 0.12 ## a crease passing this close to a paper corner goes through it
 const FLAT_SNAP := deg_to_rad(12.0)
@@ -182,6 +184,8 @@ static func plan_fold(src: Array, gi: int, g: Vector3, t: Vector3, up: Vector3, 
 	# Otherwise, a new crease that lands almost on an existing one reuses it
 	# rather than shaving off slivers next to it.
 	var crease = hinge if hinge != null else _existing_crease(src, gf, a, axis)
+	if crease == null:
+		crease = _remembered_crease(src, gf, a, axis, g)
 	if crease == null:
 		crease = _through_vertices(src, gf, a, axis)
 	if crease != null:
@@ -596,6 +600,40 @@ static func _existing_crease(src: Array, gf: Facet, a: Vector3, axis: Vector3):
 			if d < best_d:
 				best_d = d
 				best = [p, e if e.dot(axis) > 0.0 else -e]
+	return best
+
+
+## A remembered crease line (one folded before, or printed on the paper) that
+## runs close to the new crease, on paper lying in the grabbed facet's plane:
+## fold along it instead. The bigger the flap (the further the grabbed point g
+## is from the line), the coarser the aim it forgives: you can't hold the tip
+## of a 4 m flap 4 m up. Returns [point, direction] or null.
+static func _remembered_crease(src: Array, gf: Facet, a: Vector3, axis: Vector3, g: Vector3):
+	var best = null
+	var best_d := INF
+	for item in src:
+		var f: Facet = item
+		if not _coplanar(f, gf):
+			continue
+		for key in f.creases:
+			var parts: PackedStringArray = (key as String).split(":")
+			if parts.size() != 3:
+				continue
+			var d := Vector2(float(parts[0]), float(parts[1])).normalized()
+			var p0 := Vector2(-d.y, d.x) * float(parts[2]) / 1000.0 # paper-space point on the line
+			# Where the line crosses this facet's paper (folded paper puts the
+			# same paper line in different places).
+			var seg := PaperGeometry.clip_segment(p0 - d * 1000.0, p0 + d * 1000.0, f.pts)
+			if seg.is_empty() or seg[0].distance_to(seg[1]) < 0.05:
+				continue
+			var p := f.at(seg[0])
+			var e := (f.at(seg[1]) - p).normalized()
+			if absf(e.dot(axis)) < cos(deg_to_rad(5.0)):
+				continue
+			var dist := maxf(_line_dist(a - axis * 2.0, p, e), _line_dist(a + axis * 2.0, p, e))
+			if dist < maxf(MEMORY_SNAP, MEMORY_SNAP_SHARE * _line_dist(g, p, e)) and dist < best_d:
+				best_d = dist
+				best = [p + e * e.dot(a - p), e if e.dot(axis) > 0.0 else -e]
 	return best
 
 

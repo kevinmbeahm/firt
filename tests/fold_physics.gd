@@ -10,6 +10,8 @@ var lvl
 var ok := true
 var frame := 0
 var falling: PaperSheet
+var before_y := 0.0
+var before_pos := Vector3.ZERO
 
 
 func _initialize() -> void:
@@ -130,6 +132,19 @@ func _process(_d: float) -> bool:
 	elif frame == 100:
 		check(not lvl.players[0].grabbing, "P1 lets go when the sheet cancels the fold")
 		Input.action_release("p1_grab")
+		# Folding a flap over onto someone standing on the paper puts them on top
+		# of it; the sheet isn't shoved out from under them.
+		lvl.players[1].place(Vector3(-8, 0.1, 2)) # on the big sheet's right half
+	elif frame == 130:
+		before_y = lvl.players[1].global_position.y
+		before_pos = s.global_position
+		s.begin_fold(self)
+		check(s.finish_fold(0, Vector3(-9, T, 0), Vector3(6, T, 0)), "fold the left part of the sheet over onto P2")
+	elif frame == 150:
+		var flap := PaperModel.THICKNESS * 0.5 + PaperModel.LAYER_GAP # middle of the second layer
+		check(before_y < flap - 0.01 and lvl.players[1].global_position.y > flap,
+			"P2 ends up standing on top of the folded flap (%.3f -> %.3f m)" % [before_y, lvl.players[1].global_position.y])
+		check(s.global_position.distance_to(before_pos) < 0.03, "the sheet stays put (moved %.3f m)" % s.global_position.distance_to(before_pos))
 		quit(0 if ok else 1)
 	return false
 

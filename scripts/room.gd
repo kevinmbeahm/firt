@@ -108,6 +108,35 @@ func add_goal(pos: Vector3, radius: float = 3.0, min_y: float = -INF) -> void:
 	add_child(_flag)
 
 
+## A door panel that slides down into the floor when open_door() is called.
+func add_door(center: Vector3, size: Vector3, color: Color) -> AnimatableBody3D:
+	var body := AnimatableBody3D.new()
+	body.position = center
+	var mi := MeshInstance3D.new()
+	var bm := BoxMesh.new()
+	bm.size = size
+	mi.mesh = bm
+	mi.material_override = mat(color)
+	body.add_child(mi)
+	var cs := CollisionShape3D.new()
+	var shape := BoxShape3D.new()
+	shape.size = size
+	cs.shape = shape
+	body.add_child(cs)
+	add_child(body)
+	return body
+
+
+func open_door(door: AnimatableBody3D) -> void:
+	var tw := create_tween()
+	tw.tween_property(door, "position:y", door.position.y - (door.get_child(1).shape as BoxShape3D).size.y - 0.05, 1.2)
+
+
+## Extra line for the HUD (e.g. how well a shape gate is filled).
+func status() -> String:
+	return ""
+
+
 ## A checkpoint: once any player comes within `radius` of `pos`, both players
 ## respawn at `respawn` (P2 a little to the side) from then on.
 func add_checkpoint(pos: Vector3, radius: float, respawn: Vector3, side := Vector3(0, 0, 2.5)) -> void:
