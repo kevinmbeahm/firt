@@ -60,6 +60,17 @@ static func _clean(poly: PackedVector2Array) -> PackedVector2Array:
 			out.append(p)
 	if out.size() > 1 and out[0].distance_to(out[out.size() - 1]) <= MERGE_DIST:
 		out.remove_at(out.size() - 1)
+	# Drop corners that sit on a straight edge (left over from earlier cuts):
+	# they'd make one paper edge look like several.
+	var i := 0
+	while out.size() > 3 and i < out.size():
+		var prev := out[(i - 1 + out.size()) % out.size()]
+		var next := out[(i + 1) % out.size()]
+		var span := next - prev
+		if span.length() > 1e-6 and absf(span.normalized().cross(out[i] - prev)) < 1e-4:
+			out.remove_at(i)
+		else:
+			i += 1
 	if out.size() < 3 or absf(signed_area(out)) < MIN_AREA:
 		return PackedVector2Array()
 	return out

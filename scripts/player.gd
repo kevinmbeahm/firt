@@ -34,6 +34,7 @@ var _grab_start_player := Vector3.ZERO
 var _grab_start_sheet := Vector3.ZERO
 var _lift := 0.0 ## how far the hands are raised above where they grabbed
 var _fold_mode := PaperModel.FOLD_NORMAL
+var _choice := 0 ## which collapse option, in collapse mode
 var _floor_body: Object = null ## what we're standing on, from the last frame
 var _rig: Node3D
 var _arms: Array = []
@@ -201,9 +202,16 @@ func _physics_process(delta: float) -> void:
 	velocity.z = move_toward(velocity.z, target.z, accel * delta)
 
 	if grabbing:
-		# While holding paper, jump/lower raise and lower your hands instead.
-		var dir := Input.get_axis(_a("lower"), _a("jump"))
-		nudge_lift(dir * LIFT_SPEED * delta)
+		if _fold_mode == PaperModel.FOLD_COLLAPSE:
+			# Collapses lie flat, so raise/lower step through the options instead.
+			if Input.is_action_just_pressed(_a("jump")):
+				_choice += 1
+			elif Input.is_action_just_pressed(_a("lower")):
+				_choice -= 1
+		else:
+			# While holding paper, jump/lower raise and lower your hands instead.
+			var dir := Input.get_axis(_a("lower"), _a("jump"))
+			nudge_lift(dir * LIFT_SPEED * delta)
 
 	if is_on_floor():
 		velocity.y = maxf(velocity.y, 0.0)
@@ -275,9 +283,9 @@ func _update_grab(handling_sheet: bool) -> void:
 		if Input.is_action_pressed(_a("grab")):
 			if Input.is_action_just_pressed(_a("mode")):
 				_fold_mode = (_fold_mode + 1) % PaperModel.FOLD_NAMES.size()
-			_grab_sheet.update_fold(_grab_facet, _grab_local, t, _fold_mode)
+			_grab_sheet.update_fold(_grab_facet, _grab_local, t, _fold_mode, false, _choice)
 		else:
-			_grab_sheet.finish_fold(_grab_facet, _grab_local, t, _fold_mode)
+			_grab_sheet.finish_fold(_grab_facet, _grab_local, t, _fold_mode, _choice)
 			grabbing = false
 		return
 	hover = null
@@ -295,12 +303,17 @@ func _update_grab(handling_sheet: bool) -> void:
 			_grab_start_sheet = s.global_position
 			_lift = 0.0
 			_fold_mode = PaperModel.FOLD_NORMAL
+			_choice = 0
 
 
 func fold_status() -> String:
 	if not grabbing:
 		return ""
 	var msg := "%s, hands %+.1f m" % [PaperModel.FOLD_NAMES[_fold_mode], _lift]
+	if _fold_mode == PaperModel.FOLD_COLLAPSE:
+		msg = PaperModel.FOLD_NAMES[_fold_mode]
+		if _grab_sheet.fold_choices > 1:
+			msg += ", option %d of %d (raise/lower to change)" % [_grab_sheet.fold_choice + 1, _grab_sheet.fold_choices]
 	if _grab_sheet.fold_status != "":
 		msg += "  (" + _grab_sheet.fold_status + ")"
 	return msg

@@ -39,6 +39,9 @@ var _slide := Vector3.ZERO ## commanded slide velocity, ramps toward the request
 var spawn_transform := Transform3D.IDENTITY
 var _respawn := false
 var _plan_key := [] ## inputs of the current preview, to skip re-planning when idle
+var _collapse_cache := {} ## collapse search for the current grab (it's costly)
+var fold_choice := 0 ## which of several equally good collapses is shown
+var fold_choices := 0 ## how many there are (for the HUD)
 var _plan_msec := 0 ## when the preview was last planned (live previews run at ~30 Hz)
 var _handles: Array = [] ## cached grab points (rebuilt when the paper or its "up" changes)
 var _handles_up := Vector3.ZERO
@@ -123,22 +126,34 @@ func begin_fold(owner) -> bool:
 
 ## g and t are sheet-local: the grabbed point and where the hands hold it now.
 ## `mode` is one of PaperModel's FOLD_* kinds.
-func update_fold(facet: int, g: Vector3, t: Vector3, mode: int = PaperModel.FOLD_NORMAL, force := false) -> void:
+func update_fold(facet: int, g: Vector3, t: Vector3, mode: int = PaperModel.FOLD_NORMAL, force := false, choice := 0) -> void:
 	if mode != PaperModel.FOLD_NORMAL:
 		var n: Vector3 = facets[facet].normal()
 		t -= n * n.dot(t - g) # reverse folds are flat
 	# Planning is costly; only redo it when the hands actually moved, and at
 	# most ~30 times a second for the live preview.
 	if not force:
-		if _plan_key.size() == 4 and _plan_key[0] == facet and _plan_key[2] == mode \
+		if _plan_key.size() == 5 and _plan_key[0] == facet and _plan_key[2] == mode and _plan_key[4] == choice \
 				and (_plan_key[1] as Vector3).distance_to(t) < 0.01 and _same_pose(_plan_key[3]):
 			return
-		if _plan_key.size() == 4 and Time.get_ticks_msec() - _plan_msec < 33:
+		if _plan_key.size() == 5 and _plan_key[4] == choice and Time.get_ticks_msec() - _plan_msec < 33:
 			return
-	_plan_key = [facet, t, mode, global_transform]
+	_plan_key = [facet, t, mode, global_transform, choice]
 	_plan_msec = Time.get_ticks_msec()
-	var snapped := PaperModel.snap_target(facets, facet, g, t)
-	_preview = PaperModel.plan_fold(facets, facet, g, snapped, up_local(), mode)
+	var snapped := t
+	if mode == PaperModel.FOLD_COLLAPSE:
+		# Which creases can collapse together only depends on the grab, so the
+		# search runs once per grab; dragging just picks among its results.
+		if _collapse_cache.get("facet", -1) != facet:
+			_collapse_cache = PaperModel.collapse_states(facets, facet, g)
+			_collapse_cache.facet = facet
+		_preview = PaperModel.plan_collapse(facets, facet, g, t, up_local(), _collapse_cache, choice)
+		fold_choice = _preview.choice
+		fold_choices = _preview.choices
+	else:
+		snapped = PaperModel.snap_target(facets, facet, g, t)
+		_preview = PaperModel.plan_fold(facets, facet, g, snapped, up_local(), mode)
+		fold_choices = 0
 	var note := ""
 	if _preview.ok and _blocked_by_world(_preview):
 		var plan := _preview
@@ -149,12 +164,13 @@ func update_fold(facet: int, g: Vector3, t: Vector3, mode: int = PaperModel.FOLD
 	_show_crease(_preview)
 
 
-func finish_fold(facet: int, g: Vector3, t: Vector3, mode: int = PaperModel.FOLD_NORMAL) -> bool:
-	update_fold(facet, g, t, mode, true) # always plan exactly what was released
+func finish_fold(facet: int, g: Vector3, t: Vector3, mode: int = PaperModel.FOLD_NORMAL, choice := 0) -> bool:
+	update_fold(facet, g, t, mode, true, choice) # always plan exactly what was released
 	var ok: bool = _preview.ok
 	if ok:
 		_history.append(PaperModel.clone_all(facets))
 		facets = _preview.facets
+		PaperModel.remember_creases(facets)
 	fold_owner = null
 	_preview = {}
 	_plan_key = []
@@ -410,6 +426,8 @@ func nearest_handle(from_world: Vector3, radius: float):
 # --- Building ----------------------------------------------------------------
 
 func _refresh() -> void:
+	_collapse_cache = {}
+	fold_choices = 0
 	_offsets = PaperModel.stack_offsets(facets)
 	_handles_up = Vector3.ZERO # grab points need rebuilding
 	_build_mesh(facets)

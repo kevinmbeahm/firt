@@ -12,7 +12,8 @@ Open this folder in Godot 4.3+ and press **F5** (main scene: `scenes/main.tscn`)
 | Jump | Space | `/` |
 | Grab paper | hold **F** or **LMB** near a glowing corner/edge | hold **.** |
 | ...while holding: raise / lower hands | **Space** / **C** (or mouse wheel) | **/** / **;** |
-| ...while holding: cycle fold type (fold / inside reverse / outside reverse) | **Tab** | **'** |
+| ...while holding: cycle fold type (fold / inside reverse / outside reverse / collapse) | **Tab** | **'** |
+| ...in collapse mode: next / previous way to collapse | **Space** / **C** | **/** / **;** |
 | Sheet handling (hold) | **R** or **RMB**: move = slide, Space = flip over, F/LMB = turn 45 deg | **,** (same combos) |
 
 Gamepads (device 0 = P1, device 1 = P2): left stick move, A jump/raise, B lower, X grab, Y fold type, RB sheet handling.
@@ -27,6 +28,8 @@ The paper is thin (3 cm) and folds like real paper, rigidly, at any angle:
 - **Unfolding:** grab a folded flap and carry it back roughly where it came from (or lift it part-way): it swings about its existing crease, so you don't need to put the corner back exactly. A new crease near an old one also snaps onto the old one rather than leaving slivers.
 - Paper is solid. A flap that runs into the ground or anything solid stops there and rests against it, the way real paper would; a near-flat fold that would have to go under a sheet lying on the floor goes over the top instead. Over the void you can fold a flap down to hang freely. A fold is only refused (red crease, reason in the HUD) when the flap can't move at all, or would end up passing through other paper. Corners buried under a layer on top can't be grabbed; flip the sheet to reach the other side.
 - **Reverse folds** (Tab / ' / Y while holding paper): on a folded edge (layers joined at a spine, e.g. a strip folded in half), the two sides of the tip swing about the same crease in opposite directions. An *inside reverse fold* tucks the tip between the layers (a crane's neck and tail); an *outside reverse fold* wraps it around them. They need a folded edge and are always flat.
+- **Collapse (squash / petal folds)**: the fourth fold type. Precrease first (fold and unfold), then grab a point and collapse: every existing crease may fold or unfold together, as long as the result is flat-foldable (Kawasaki's theorem at every crease vertex) and nothing tears. That's how you make a square base from a precreased square, or a petal fold on a kite. When the creases allow several collapses (square base vs waterbomb, say), raise/lower your hands to step through them; the HUD shows "option i of n". The simplest one that brings the grabbed point closest to your hands comes first.
+- **Layering**: every flat fold's stacking order comes from a layer solver (the taco/tortilla rules plus transitivity), so a fold that would need paper to pass through paper is refused rather than faked.
 - Hold *sheet handling* to slide the whole sheet (riders are carried; if you're not on it you walk alongside), flip it over (to fold the other side) or turn it.
 
 ## Paper physics
@@ -48,15 +51,18 @@ The smaller sheet on the island is a free-folding sandbox: try a paper plane, or
 - `godot --headless -s tests/paper_physics.gd` checks sheets rest, tip into the void when pushed over an edge, respawn, and tip under the players' weight.
 - `godot --headless -s tests/solve_level.gd` has bots solve level 1 with real input actions (fold a ramp, ride the sheet out to the ledge, climb) and asserts the win condition.
 
+- `godot --headless -s tests/crane.gd` is the **benchmark**: it folds a traditional paper crane from an 8 m square in 28 steps with the game's own operations (precreases, square-base collapse, kite folds, petal folds, inside reverse folds for neck, tail and head, wing folds). After every step it checks the whole sheet: no tears, no paper through paper, no paper lost, a valid stacking. It prints a step table (52 facets, about 1.3 s of planning in total). `godot -s tests/crane.gd -- --shots=DIR` renders the finished crane to `DIR` (needs a display).
+
 ## Code layout
 - `scripts/paper_geometry.gd` - 2D polygon clipping / overlap helpers
 - `scripts/paper_model.gd` - rigid-origami model: facets in paper space + 3D transforms, fold planning (crease from grab/target, connectivity, tear check, layer order, reverse folds), stacking offsets, grab handles
+- `scripts/paper_layers.gd` - layer-order solver for flat-folded stacks (taco/tortilla constraints, transitivity, search)
 - `scripts/paper_sheet.gd` - a sheet in the world (`RigidBody3D`): mass/centre of mass from the paper, sliding, respawn, live fold preview, undo, flip/turn, thin-slab meshes and collision
 - `scripts/player.gd` - `CharacterBody3D` bean: movement, step-up, grab/fold input, procedural wobble and arm reaching
 - `scripts/level.gd` - terrain, lighting, sheets, shared orbit camera, input map, sheet sliding, win condition
 
 ## Known limits / next steps
-- Fold kinds so far: single-crease folds plus inside/outside reverse folds. A full crane also needs **squash** and **petal** folds (more creases moving together); those are next.
+- Crane benchmark limits: the usual leg-narrowing step is left out, because with rigid paper those creases have to run on into the wing layers and fuse the wings to the body (real paper flexes there). The neck and tail come out short (head 2.3 m up, under the 4 m wing hinge), and the head bends at about 30 deg rather than 60 deg. Steeper reverse folds aren't possible with this bird base in the rigid model.
 - Paper is rigid between creases: a whole sheet tips and falls, but a flap doesn't droop or bend under its own weight.
 - Fold collision checks the folded result (and, for ordinary folds, the flap's swing) against the world, but checks paper-against-paper only for the final position, so a flap can still swing through other paper on its way to a valid spot.
 - Flip turns a sheet 180 deg; there's no free 3D rotation yet (e.g. to stand a finished plane upright, or throw it).

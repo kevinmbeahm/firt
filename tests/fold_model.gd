@@ -44,28 +44,37 @@ func reverse_fold_tests() -> void:
 	var r := fold(strip, Vector3(-1, T, 4), Vector3(1, T, 4))
 	check(r.ok and r.facets.size() == 2, "strip folded in half (spine along x=0)")
 	strip = r.facets
-	# Grab the spine's tip and carry it out sideways: crease from (0,-2) to (1,-3).
+	# Grab the spine's tip and carry it out sideways. Which reverse folds are
+	# possible depends on where the tip's own spine ends up: an inside reverse
+	# needs it tucked within the strip, an outside reverse needs it clear of the
+	# strip (otherwise the strip would have to pass through the fold).
 	var g := Vector3(0, T, -4)
-	var t := Vector3(2, T, -2)
-	var plain := fold(strip, g, t)
-	var inside := fold(strip, g, t, false, PaperModel.FOLD_INSIDE_REVERSE)
-	var outside := fold(strip, g, t, false, PaperModel.FOLD_OUTSIDE_REVERSE)
-	check(plain.ok and inside.ok and outside.ok, "plain, inside-reverse and outside-reverse folds all plan (%s / %s)" % [inside.reason, outside.reason])
+	var t_in := Vector3(2, T, -2) # crease (0,-2)-(1,-3): tip spine runs across the strip
+	var t_out := Vector3(-1.6, T, -0.8) # crease (0,-2)-(1,-1.5): tip spine lands off the strip
+	var plain := fold(strip, g, t_in)
+	var inside := fold(strip, g, t_in, false, PaperModel.FOLD_INSIDE_REVERSE)
+	var outside := fold(strip, g, t_out, false, PaperModel.FOLD_OUTSIDE_REVERSE)
+	check(plain.ok and inside.ok and outside.ok, "plain, inside-reverse and outside-reverse folds plan (%s / %s)" % [inside.reason, outside.reason])
+	var bad_out := fold(strip, g, t_in, false, PaperModel.FOLD_OUTSIDE_REVERSE)
+	var bad_in := fold(strip, g, t_out, false, PaperModel.FOLD_INSIDE_REVERSE)
+	check(not bad_out.ok and not bad_in.ok, "reverse folds whose tip would cut through the strip are refused (%s / %s)" % [bad_out.reason, bad_in.reason])
 	if not (inside.ok and outside.ok):
 		return
 	check(inside.facets.size() == 4 and outside.facets.size() == 4, "the crease splits both layers")
-	for f in inside.facets:
+	for f in inside.facets + outside.facets:
 		if absf(f.normal().y) < 0.99:
 			check(false, "reverse-folded paper lies flat")
 			return
-	# The tip pieces are the ones that moved out past x=1 (they point sideways now).
+	check(PaperLayers.check(inside.facets).is_empty() and PaperLayers.check(outside.facets).is_empty(),
+		"both reverse folds stack physically")
+	# The tip pieces are the ones that moved out of the strip's original area.
 	var moved_in: Array = []
 	var moved_out: Array = []
 	for f in inside.facets:
 		if f.at(PaperGeometry.centroid(f.pts)).x > 0.8:
 			moved_in.append(f.layer)
 	for f in outside.facets:
-		if f.at(PaperGeometry.centroid(f.pts)).x > 0.8:
+		if f.at(PaperGeometry.centroid(f.pts)).x < -0.05:
 			moved_out.append(f.layer)
 	moved_in.sort()
 	moved_out.sort()
