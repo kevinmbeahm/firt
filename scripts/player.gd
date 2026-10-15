@@ -25,6 +25,8 @@ var level ## Level (untyped to avoid a circular class dependency)
 var spawn := Vector3.ZERO
 
 var grabbing := false
+var controlled_by := 1 ## which player's controls drive this character: 1, 2, or 0 = idle (solo play)
+var _latched := false ## holding on for a player who just took over, until they press grab
 var hover = null ## {sheet, world, local, facet} of the reachable corner/edge, or null
 
 var _grab_sheet: PaperSheet
@@ -41,6 +43,7 @@ var _arms: Array = []
 var _hands: Array = []
 var _legs: Array = []
 var _marker: MeshInstance3D
+var _pointer: MeshInstance3D
 var _phase := 0.0
 var _tilt := Vector2.ZERO
 var _tilt_vel := Vector2.ZERO
@@ -48,10 +51,43 @@ var _yaw := 0.0
 
 
 func _a(action: String) -> String:
-	return "p%d_%s" % [id, action]
+	return "p%d_%s" % [controlled_by, action]
+
+
+## Input, from whoever controls this character right now. An idle character
+## (controlled_by 0, in solo play) presses nothing but keeps holding what it
+## holds.
+func _pressed(action: String) -> bool:
+	if action == "grab" and grabbing and (controlled_by == 0 or _latched):
+		return true
+	return controlled_by != 0 and Input.is_action_pressed(_a(action))
+
+
+func _just(action: String) -> bool:
+	return controlled_by != 0 and Input.is_action_just_pressed(_a(action))
+
+
+func _stick() -> Vector2:
+	if controlled_by == 0:
+		return Vector2.ZERO
+	return Input.get_vector(_a("left"), _a("right"), _a("up"), _a("down"))
+
+
+func _axis(negative: String, positive: String) -> float:
+	return 0.0 if controlled_by == 0 else Input.get_axis(_a(negative), _a(positive))
+
+
+## Hands control of this character to input set `who` (1 or 2), or 0 to leave
+## it idle. A character taken over while holding paper keeps holding it until
+## its new player presses grab (and lets go when they release it).
+func set_controller(who: int) -> void:
+	if who != 0 and who != controlled_by and grabbing:
+		_latched = not Input.is_action_pressed("p%d_grab" % who)
+	controlled_by = who
 
 
 func _ready() -> void:
+	controlled_by = id
 	add_to_group("players")
 	floor_snap_length = STEP_HEIGHT + 0.1
 	floor_max_angle = deg_to_rad(50.0)
@@ -156,6 +192,24 @@ func _build_visuals() -> void:
 	_marker.visible = false
 	add_child(_marker)
 
+	# In solo play, an arrow over the bean you're controlling.
+	_pointer = MeshInstance3D.new()
+	var cone := CylinderMesh.new()
+	cone.top_radius = 0.22
+	cone.bottom_radius = 0.0
+	cone.height = 0.4
+	_pointer.mesh = cone
+	var white := StandardMaterial3D.new()
+	white.albedo_color = Color(1, 1, 1)
+	white.emission_enabled = true
+	white.emission = Color(1, 1, 1)
+	white.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_pointer.material_override = white
+	_pointer.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_pointer.position.y = 2.45
+	_pointer.visible = false
+	add_child(_pointer)
+
 
 func _mat(c: Color) -> StandardMaterial3D:
 	var m := StandardMaterial3D.new()
@@ -165,29 +219,47 @@ func _mat(c: Color) -> StandardMaterial3D:
 
 
 func respawn() -> void:
-	if grabbing:
-		_grab_sheet.cancel_fold()
-		grabbing = false
+	release()
 	global_position = spawn
 	velocity = Vector3.ZERO
+
+
+## Lets go of anything held (the fold in progress is dropped).
+func release() -> void:
+	_latched = false
+	if grabbing:
+		if is_instance_valid(_grab_sheet):
+			_grab_sheet.cancel_fold()
+		grabbing = false
+	hover = null
+
+
+## Puts the player at `pos` (and makes it their respawn point), e.g. at the
+## start of a room.
+func place(pos: Vector3) -> void:
+	release()
+	spawn = pos
+	global_position = pos
+	velocity = Vector3.ZERO
+	_floor_body = null
 
 
 # --- Physics -----------------------------------------------------------------
 
 func _physics_process(delta: float) -> void:
-	var input := Input.get_vector(_a("left"), _a("right"), _a("up"), _a("down"))
+	var input := _stick()
 	var wish: Vector3 = level.camera_basis() * Vector3(input.x, 0.0, input.y)
 
 	# Separate control: while held, movement slides the whole sheet, jump flips
 	# it over and grab turns it.
-	var handling_sheet := Input.is_action_pressed(_a("sheet")) and not grabbing
+	var handling_sheet := _pressed("sheet") and not grabbing
 	if handling_sheet:
 		var s: PaperSheet = level.sheet_near(self)
 		if s != null and not s.is_busy():
 			s.push(wish * level.sheet_speed)
-			if Input.is_action_just_pressed(_a("jump")):
+			if _just("jump"):
 				s.flip(level.camera_basis().x)
-			elif Input.is_action_just_pressed(_a("grab")):
+			elif _just("grab"):
 				s.turn(PI * 0.25)
 		# Ride the sheet if you're on it, otherwise walk alongside as you push.
 		if s == null or _floor_body == s:
@@ -204,18 +276,18 @@ func _physics_process(delta: float) -> void:
 	if grabbing:
 		if _fold_mode == PaperModel.FOLD_COLLAPSE:
 			# Collapses lie flat, so raise/lower step through the options instead.
-			if Input.is_action_just_pressed(_a("jump")):
+			if _just("jump"):
 				_choice += 1
-			elif Input.is_action_just_pressed(_a("lower")):
+			elif _just("lower"):
 				_choice -= 1
 		else:
 			# While holding paper, jump/lower raise and lower your hands instead.
-			var dir := Input.get_axis(_a("lower"), _a("jump"))
+			var dir := _axis("lower", "jump")
 			nudge_lift(dir * LIFT_SPEED * delta)
 
 	if is_on_floor():
 		velocity.y = maxf(velocity.y, 0.0)
-		if Input.is_action_just_pressed(_a("jump")) and not grabbing and not handling_sheet:
+		if _just("jump") and not grabbing and not handling_sheet:
 			velocity.y = JUMP_SPEED
 		else:
 			_step_up(Vector3(velocity.x, 0.0, velocity.z) * delta)
@@ -276,12 +348,14 @@ func _hands_world() -> Vector3:
 
 
 func _update_grab(handling_sheet: bool) -> void:
-	if grabbing and _grab_sheet.fold_owner != self:
+	if grabbing and (not is_instance_valid(_grab_sheet) or _grab_sheet.fold_owner != self):
 		grabbing = false # the sheet dropped the fold (respawned, reset...)
 	if grabbing:
 		var t := _grab_sheet.to_local(_hands_world())
-		if Input.is_action_pressed(_a("grab")):
-			if Input.is_action_just_pressed(_a("mode")):
+		if _latched and Input.is_action_pressed(_a("grab")):
+			_latched = false # the new player has taken hold of it
+		if _pressed("grab"):
+			if _just("mode"):
 				_fold_mode = (_fold_mode + 1) % PaperModel.FOLD_NAMES.size()
 			_grab_sheet.update_fold(_grab_facet, _grab_local, t, _fold_mode, false, _choice)
 		else:
@@ -292,7 +366,7 @@ func _update_grab(handling_sheet: bool) -> void:
 	if handling_sheet:
 		return
 	hover = level.find_handle(global_position + Vector3.UP, REACH)
-	if hover != null and Input.is_action_just_pressed(_a("grab")):
+	if hover != null and _just("grab"):
 		var s: PaperSheet = hover.sheet
 		if s.begin_fold(self):
 			grabbing = true
@@ -369,6 +443,9 @@ func _process(delta: float) -> void:
 			arm.rotation = Vector3(deg_to_rad(-80.0 + lift * 60.0) + 0.7 * swing * -s, 0.0, 0.0)
 			arm.scale = Vector3.ONE
 		hand.global_position = arm.global_transform * Vector3(0, 0, -ARM_LEN)
+
+	_pointer.visible = level.solo and controlled_by == 1
+	_pointer.position.y = 2.45 + 0.08 * sin(Time.get_ticks_msec() * 0.006)
 
 	# Marker on what you can grab / are holding.
 	if grabbing:

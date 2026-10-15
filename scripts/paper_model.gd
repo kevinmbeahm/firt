@@ -62,14 +62,19 @@ class Facet:
 		return xf * Vector3(p.x, p.y, 0.0)
 
 
-static func make_sheet(size: Vector2) -> Array:
+## A flat sheet. `printed` crease lines ({a, b, mv}) start out in its crease
+## memory, as if folded that way before.
+static func make_sheet(size: Vector2, printed: Array = []) -> Array:
 	var h := size * 0.5
 	var rect := PackedVector2Array([
 		Vector2(-h.x, -h.y), Vector2(h.x, -h.y), Vector2(h.x, h.y), Vector2(-h.x, h.y)
 	])
+	var memory := {}
+	for c in printed:
+		memory[line_key(PackedVector2Array([c.a, c.b]))] = int(c.get("mv", 1))
 	# Paper x -> +X, paper y -> -Z, so the front normal (x cross y) is +Y.
 	var basis := Basis(Vector3(1, 0, 0), Vector3(0, 0, -1), Vector3(0, 1, 0))
-	return [Facet.new(rect, Transform3D(basis, Vector3(0, THICKNESS * 0.5, 0)), 0)]
+	return [Facet.new(rect, Transform3D(basis, Vector3(0, THICKNESS * 0.5, 0)), 0, memory)]
 
 
 static func clone_all(src: Array) -> Array:

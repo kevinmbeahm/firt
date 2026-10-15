@@ -69,7 +69,7 @@ func _process(_d: float) -> bool:
 				check(s.global_position.y < -3.0, "pushed past its balance point, the sheet tips into the void")
 				next()
 		2:
-			if s.global_position.y > -1.0 and s.global_position.distance_to(lvl.PUZZLE_START) < 0.5:
+			if s.global_position.y > -1.0 and s.global_position.distance_to(lvl.room.PUZZLE_START) < 0.5:
 				check(true, "the lost sheet respawned at its start")
 				next()
 			elif waited(1200):

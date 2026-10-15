@@ -18,6 +18,7 @@ const LOST_Y := -25.0 ## below this the sheet is lost in the void and respawns
 const CONTACT_SLOP := 0.02 ## overlaps shallower than this (a loaded sheet settling) don't block folds
 
 var paper_size := Vector2(18, 12)
+var printed_creases: Array = [] ## {a, b, mv} lines printed on the paper (see setup)
 var facets: Array = [] ## Array[PaperModel.Facet]
 var fold_owner = null ## the player currently dragging a fold, if any
 var fold_status := "" ## why the current drag can't fold, for the HUD
@@ -84,13 +85,18 @@ func _glow(c: Color) -> StandardMaterial3D:
 	return m
 
 
-func setup(size: Vector2) -> void:
+## `printed` crease lines, each {a: Vector2, b: Vector2, mv: +1 valley / -1
+## mountain} in paper coordinates (centred, metres, paper y = sheet -Z), are
+## drawn on the paper and remembered as creases, so folds snap to them and
+## collapses prefer folding them the printed way.
+func setup(size: Vector2, printed: Array = []) -> void:
 	paper_size = size
+	printed_creases = printed
 	reset_paper()
 
 
 func reset_paper() -> void:
-	facets = PaperModel.make_sheet(paper_size)
+	facets = PaperModel.make_sheet(paper_size, printed_creases)
 	_history.clear()
 	fold_owner = null
 	_preview = {}
