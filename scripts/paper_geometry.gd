@@ -1,9 +1,9 @@
 class_name PaperGeometry
 extends RefCounted
-## Pure 2D polygon helpers used by the paper folding code.
+## Pure 2D polygon helpers used by the paper folding code (units: metres).
 
-const MIN_AREA := 4.0
-const MERGE_DIST := 0.01
+const MIN_AREA := 0.02 ## square metres
+const MERGE_DIST := 0.001
 
 
 ## Clips a convex polygon against the half plane (p - origin) . normal >= 0
@@ -35,6 +35,14 @@ static func signed_area(poly: PackedVector2Array) -> float:
 		var b := poly[(i + 1) % count]
 		total += a.x * b.y - b.x * a.y
 	return total * 0.5
+
+
+## Total area where two convex polygons overlap.
+static func overlap_area(a: PackedVector2Array, b: PackedVector2Array) -> float:
+	var total := 0.0
+	for poly in Geometry2D.intersect_polygons(a, b):
+		total += absf(signed_area(poly))
+	return total
 
 
 static func centroid(poly: PackedVector2Array) -> Vector2:
