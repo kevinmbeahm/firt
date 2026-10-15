@@ -80,11 +80,11 @@ func _physics_process(delta: float) -> void:
 	_update_look()
 
 
-## Kilograms resting in the column above the plate now (held props don't count).
+## Kilograms resting in the column above the plate now (carried props don't count).
 func weigh() -> float:
 	var kg := 0.0
 	for p in props:
-		if is_instance_valid(p) and p.holder == null and _on_plate(p.global_position):
+		if is_instance_valid(p) and not p.is_carried() and _on_plate(p.global_position):
 			kg += p.mass
 	if counts_players:
 		for b in players:

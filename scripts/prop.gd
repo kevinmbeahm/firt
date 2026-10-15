@@ -21,6 +21,7 @@ var spawn_transform := Transform3D.IDENTITY
 var _respawn := false
 var _wake_time := 0.0
 var _nudge := Vector3.ZERO
+var _ridden_at := -10 ## physics frame it last rode in a carried sheet
 
 
 ## Sets the prop up before it enters the tree.
@@ -97,7 +98,14 @@ func drop() -> void:
 ## (see PaperSheet._carry_riders).
 func nudge(dv: Vector3) -> void:
 	_nudge += dv
+	_ridden_at = Engine.get_physics_frames()
 	sleeping = false
+
+
+## Held by a bean, or riding in a sheet two beans are carrying: it's off the
+## ground, so plates don't weigh it.
+func is_carried() -> bool:
+	return holder != null or Engine.get_physics_frames() - _ridden_at <= 2
 
 
 ## Back to where it started (lost in the void, or a plate dumped it).

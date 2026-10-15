@@ -302,6 +302,7 @@ func basket_run() -> void:
 		if in_box(a.global_position, room.sheet.global_position + Vector3(-6, -1, -4), room.sheet.global_position + Vector3(6, 3, 4)):
 			still += 1
 	check(still == 6, "carried level, all six apples are still in the trough (%d)" % still)
+	check(not room.scale_plate.is_pressed, "held up over the scale, the apples don't count yet (%d kg)" % roundi(room.scale_plate.load_kg))
 	await snap("basket_carry")
 	# 5. Set it down on the scale and let go.
 	Input.action_press("p1_lower")
