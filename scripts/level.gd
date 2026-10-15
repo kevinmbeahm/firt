@@ -11,6 +11,8 @@ const ROOMS := [
 	preload("res://scripts/rooms/ramp.gd"),
 	preload("res://scripts/rooms/doorway_square.gd"),
 	preload("res://scripts/rooms/doorway_house.gd"),
+	preload("res://scripts/rooms/basket_run.gd"),
+	preload("res://scripts/rooms/counterweight.gd"),
 ]
 const ADVANCE_DELAY := 3.0 ## seconds between solving a room and loading the next
 
@@ -71,6 +73,9 @@ func _ready() -> void:
 	_room_hud.offset_left = 16
 	_room_hud.offset_top = -110
 	_room_hud.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	_room_hud.anchor_right = 1.0
+	_room_hud.offset_right = -16
+	_room_hud.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	layer.add_child(_room_hud)
 
 	var start := 0
@@ -187,12 +192,25 @@ func camera_basis() -> Basis:
 	return Basis(Vector3.UP, cam_yaw)
 
 
-## Nearest grabbable corner/edge on any sheet: {sheet, world, local, facet} or null.
+## An edge in reach wins over a prop up to this much nearer: a thin edge is
+## harder to aim at, and it lets you pick up a trough with apples in it.
+const EDGE_BONUS := 0.35
+
+
+## Nearest thing to grab: a prop ({prop, world, dist}) or a sheet's corner or
+## edge ({sheet, world, local, facet, dist}), or null.
 func find_handle(from_world: Vector3, radius: float):
 	var best = null
+	for p in room.props:
+		var prop: Prop = p
+		if prop.holder != null:
+			continue
+		var d := maxf(prop.global_position.distance_to(from_world) - prop.size, 0.0)
+		if d < radius and (best == null or d < best.dist):
+			best = {"prop": prop, "world": prop.global_position, "dist": d}
 	for s in sheets:
 		var h = s.nearest_handle(from_world, radius)
-		if h != null and (best == null or h.dist < best.dist):
+		if h != null and (best == null or h.dist - (EDGE_BONUS if best.has("prop") else 0.0) < best.dist):
 			h.sheet = s
 			best = h
 	return best

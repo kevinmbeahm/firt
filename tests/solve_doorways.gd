@@ -262,7 +262,7 @@ func run() -> void:
 	await frames(120)
 	await snap("house_open")
 	await finish_room()
-	check(lvl.complete and lvl.all_complete, "both beans reach the flag: house room complete (last room)")
+	check(lvl.complete, "both beans reach the flag: house room complete")
 	release_all()
 	quit(0 if ok else 1)
 

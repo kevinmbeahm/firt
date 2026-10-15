@@ -18,13 +18,16 @@ const WEIGHT := 70.0 * 9.8 ## newtons pressed into paper you stand on
 const FALL_DEATH_Y := -14.0
 const ARM_LEN := 0.75
 const MAX_ARM_STRETCH := 2.6
+const PROP_LIFT := Vector2(-1.0, 1.6) ## how far a carried prop can be lowered/raised
 
 var id := 1
 var color := Color.WHITE
 var level ## Level (untyped to avoid a circular class dependency)
 var spawn := Vector3.ZERO
 
-var grabbing := false
+var grabbing := false ## holding a sheet: folding it, or carrying it with the other bean
+var carrying := false ## ...carrying it (see PaperSheet.start_carry)
+var held_prop: Prop = null ## a prop carried in front of you
 var controlled_by := 1 ## which player's controls drive this character: 1, 2, or 0 = idle (solo play)
 var _latched := false ## holding on for a player who just took over, until they press grab
 var hover = null ## {sheet, world, local, facet} of the reachable corner/edge, or null
@@ -34,6 +37,9 @@ var _grab_facet := 0
 var _grab_local := Vector3.ZERO ## grabbed point, sheet-local
 var _grab_start_player := Vector3.ZERO
 var _grab_start_sheet := Vector3.ZERO
+var _carry_anchor := Vector3.ZERO ## (carrying) where your hands were when the carry started, world
+var _carry_from := Vector3.ZERO ## ...and where you stood
+var _carry_lift := 0.0 ## ...and how high your hands were
 var _lift := 0.0 ## how far the hands are raised above where they grabbed
 var _fold_mode := PaperModel.FOLD_NORMAL
 var _choice := 0 ## which collapse option, in collapse mode
@@ -71,12 +77,28 @@ func _just(action: String) -> bool:
 
 func _stick() -> Vector2:
 	if controlled_by == 0:
-		return Vector2.ZERO
+		var partner = _carry_partner()
+		return partner._stick() if partner != null and partner.controlled_by != 0 else Vector2.ZERO
 	return Input.get_vector(_a("left"), _a("right"), _a("up"), _a("down"))
 
 
 func _axis(negative: String, positive: String) -> float:
-	return 0.0 if controlled_by == 0 else Input.get_axis(_a(negative), _a(positive))
+	if controlled_by == 0:
+		var partner = _carry_partner()
+		return partner._axis(negative, positive) if partner != null and partner.controlled_by != 0 else 0.0
+	return Input.get_axis(_a(negative), _a(positive))
+
+
+## The other bean carrying the same sheet. An idle bean (solo play) carrying a
+## sheet with the bean you control walks and lifts in step with it, so one
+## player can carry a sheet with both beans.
+func _carry_partner():
+	if not carrying or not is_instance_valid(_grab_sheet):
+		return null
+	for p in _grab_sheet.carriers:
+		if p != self:
+			return p
+	return null
 
 
 ## Hands control of this character to input set `who` (1 or 2), or 0 to leave
@@ -228,6 +250,9 @@ func respawn() -> void:
 ## Lets go of anything held (the fold in progress is dropped).
 func release() -> void:
 	_latched = false
+	drop_prop()
+	if carrying and is_instance_valid(_grab_sheet):
+		_grab_sheet.end_carry()
 	if grabbing:
 		if is_instance_valid(_grab_sheet):
 			_grab_sheet.cancel_fold()
@@ -281,13 +306,17 @@ func _physics_process(delta: float) -> void:
 			wish *= level.sheet_speed / SPEED
 
 	var speed := SPEED * (DRAG_SPEED_MULT if grabbing else 1.0)
+	if held_prop != null:
+		speed *= clampf(1.0 - held_prop.mass / 200.0, 0.5, 1.0) # heavy things slow you down
 	var accel := GROUND_ACCEL if is_on_floor() else AIR_ACCEL
 	var target := wish * speed
 	velocity.x = move_toward(velocity.x, target.x, accel * delta)
 	velocity.z = move_toward(velocity.z, target.z, accel * delta)
 
-	if grabbing:
-		if _fold_mode == PaperModel.FOLD_COLLAPSE:
+	if held_prop != null:
+		_lift = clampf(_lift + _axis("lower", "jump") * LIFT_SPEED * delta, PROP_LIFT.x, PROP_LIFT.y)
+	elif grabbing:
+		if _fold_mode == PaperModel.FOLD_COLLAPSE and not carrying:
 			# Collapses lie flat, so raise/lower step through the options instead.
 			if _just("jump"):
 				_choice += 1
@@ -300,7 +329,7 @@ func _physics_process(delta: float) -> void:
 
 	if is_on_floor():
 		velocity.y = maxf(velocity.y, 0.0)
-		if _just("jump") and not grabbing and not handling_sheet:
+		if _just("jump") and not grabbing and held_prop == null and not handling_sheet:
 			velocity.y = JUMP_SPEED
 		else:
 			_step_up(Vector3(velocity.x, 0.0, velocity.z) * delta)
@@ -354,6 +383,8 @@ func _step_up(motion: Vector3) -> void:
 ## Where the hands hold the grabbed point now, in world space. It follows the
 ## player's walking (not the sheet's own motion) and the raised/lowered hands.
 func _hands_world() -> Vector3:
+	if carrying:
+		return carry_hands()
 	var s := _grab_sheet
 	var walked := global_position - _grab_start_player
 	var slid := s.global_position - _grab_start_sheet
@@ -361,6 +392,18 @@ func _hands_world() -> Vector3:
 
 
 func _update_grab(handling_sheet: bool) -> void:
+	if held_prop != null:
+		if not is_instance_valid(held_prop) or held_prop.holder != self:
+			held_prop = null
+		elif not _pressed("grab"):
+			drop_prop()
+		return
+	if carrying:
+		if not is_instance_valid(_grab_sheet) or not _grab_sheet.carriers.has(self):
+			end_carry()
+		elif not _pressed("grab"):
+			_grab_sheet.end_carry() # either carrier letting go drops it
+		return
 	if grabbing and (not is_instance_valid(_grab_sheet) or _grab_sheet.fold_owner != self):
 		grabbing = false # the sheet dropped the fold (respawned, reset...)
 	if grabbing:
@@ -380,6 +423,11 @@ func _update_grab(handling_sheet: bool) -> void:
 		return
 	hover = level.find_handle(global_position + Vector3.UP, REACH)
 	if hover != null and _just("grab"):
+		if hover.has("prop"):
+			held_prop = hover.prop
+			held_prop.pick_up(self)
+			_lift = 0.0
+			return
 		var s: PaperSheet = hover.sheet
 		if s.begin_fold(self):
 			grabbing = true
@@ -391,9 +439,55 @@ func _update_grab(handling_sheet: bool) -> void:
 			_lift = 0.0
 			_fold_mode = PaperModel.FOLD_NORMAL
 			_choice = 0
+		elif s.can_join_carry(self):
+			# Someone's already holding it: pick it up together.
+			_grab_sheet = s
+			_grab_local = hover.local
+			s.start_carry(self, hover.local)
+
+
+## Called by the sheet when a carry starts: hold it where it is now.
+func begin_carry(s: PaperSheet, hands_at: Vector3) -> void:
+	grabbing = true
+	carrying = true
+	_grab_sheet = s
+	_carry_anchor = hands_at
+	_carry_from = global_position
+	_carry_lift = _lift
+
+
+## Called by the sheet when the carry ends.
+func end_carry() -> void:
+	carrying = false
+	grabbing = false
+
+
+## (Carrying) where your hands are now, world: they move as you walk (up and
+## down slopes too) and as you raise or lower them.
+func carry_hands() -> Vector3:
+	var walked := global_position - _carry_from
+	return _carry_anchor + walked + Vector3.UP * (_lift - _carry_lift)
+
+
+## (Holding a prop) where it's held: in front of you at chest height, raised
+## or lowered with your hands.
+func hold_point() -> Vector3:
+	var fwd := Vector3(-sin(_yaw), 0.0, -cos(_yaw))
+	return global_position + fwd * (0.75 + held_prop.size) + Vector3.UP * (1.1 + _lift)
+
+
+func drop_prop() -> void:
+	if held_prop != null and is_instance_valid(held_prop):
+		held_prop.drop()
+	held_prop = null
+	_lift = 0.0
 
 
 func fold_status() -> String:
+	if held_prop != null:
+		return "carrying a %d kg %s" % [roundi(held_prop.mass), ["ball", "crate", "weight block"][held_prop.kind]]
+	if carrying:
+		return "carrying the sheet together (raise/lower your end with jump/lower; keep it level)"
 	if not grabbing:
 		return ""
 	var msg := "%s, hands %+.1f m" % [PaperModel.FOLD_NAMES[_fold_mode], _lift]
@@ -419,6 +513,8 @@ func _process(delta: float) -> void:
 		reach_target = _hands_world()
 		look_dir = reach_target - global_position
 		look_dir.y = 0.0
+	elif held_prop != null:
+		reach_target = held_prop.global_position
 	elif hover != null:
 		reach_target = hover.world
 	if look_dir.length() > 0.15:
@@ -465,6 +561,8 @@ func _process(delta: float) -> void:
 		_marker.visible = true
 		_marker.scale = Vector3.ONE
 		_marker.global_position = _hands_world()
+	elif held_prop != null:
+		_marker.visible = false
 	elif hover != null:
 		_marker.visible = true
 		var pulse := 1.0 + 0.2 * sin(Time.get_ticks_msec() * 0.008)

@@ -13,6 +13,7 @@ var title := ""
 var hint := "" ## one line shown under the controls
 var sheets: Array = []
 var sheet: PaperSheet ## the room's main sheet (the first one added)
+var props: Array = [] ## loose props (balls, crates, weight blocks)
 var spawns: Array = [Vector3.ZERO, Vector3(0, 0, 3)] ## where P1 and P2 start
 var cam_yaw := -PI * 0.5 ## starting camera direction
 var checkpoints: Array = [] ## {pos, radius, spawns}: reaching one moves both players' respawn points
@@ -106,6 +107,98 @@ func add_goal(pos: Vector3, radius: float = 3.0, min_y: float = -INF) -> void:
 	_flag.material_override = mat(Color(1, 0.85, 0.2))
 	_flag.position = pos + Vector3(0.7, 2.5, 0)
 	add_child(_flag)
+
+
+## A loose prop at `pos` (see Prop for the kinds).
+func add_prop(kind: int, pos: Vector3, kg: float, color: Color, half_size := 0.45) -> Prop:
+	var p := Prop.new()
+	p.setup(kind, kg, color, half_size)
+	p.position = pos
+	add_child(p)
+	props.append(p)
+	return p
+
+
+## The solo stand-in: a block as heavy as a bean.
+func add_weight_block(pos: Vector3) -> Prop:
+	return add_prop(Prop.WEIGHT, pos, 70.0, Color(0.32, 0.33, 0.38), 0.45)
+
+
+## A pressure plate centred at `pos` (top of the floor there) that weighs this
+## room's props.
+func add_plate(pos: Vector3, plate_size: Vector2, kg: float) -> PressurePlate:
+	var plate := PressurePlate.new()
+	plate.position = pos
+	add_child(plate)
+	plate.setup(plate_size, kg, props, level.players if level != null else [])
+	return plate
+
+
+## A seesaw plank (S8): `length` m long along X, pivoting about the Z axis at
+## `pivot`, tipping up to `max_angle` either way (stopped by blocks under its
+## ends). It starts with its -X end down, and `lean` (newton-metres) keeps it
+## leaning that way when nothing else is on it, as if weighted under that end.
+## Returns the plank body.
+func add_seesaw(pivot: Vector3, length: float, width: float, max_angle: float, kg: float, color: Color, lean := 0.0) -> RigidBody3D:
+	var plank := RigidBody3D.new()
+	plank.mass = kg
+	plank.axis_lock_linear_x = true
+	plank.axis_lock_linear_y = true
+	plank.axis_lock_linear_z = true
+	plank.axis_lock_angular_x = true
+	plank.axis_lock_angular_y = true
+	plank.angular_damp = 1.5
+	plank.can_sleep = false
+	var pm := PhysicsMaterial.new()
+	pm.friction = 0.9
+	plank.physics_material_override = pm
+	var mi := MeshInstance3D.new()
+	var bm := BoxMesh.new()
+	bm.size = Vector3(length, 0.3, width)
+	mi.mesh = bm
+	mi.material_override = mat(color)
+	plank.add_child(mi)
+	var cs := CollisionShape3D.new()
+	var shape := BoxShape3D.new()
+	shape.size = Vector3(length, 0.3, width)
+	cs.shape = shape
+	plank.add_child(cs)
+	plank.position = pivot
+	plank.rotation.z = max_angle # -X end down
+	plank.constant_torque = Vector3(0, 0, lean)
+	add_child(plank)
+	# The post it pivots on (just clear of the plank), and the stops under its ends.
+	add_block(Vector3(pivot.x, (pivot.y - 0.25) * 0.5 - 4.0, pivot.z), Vector3(0.6, pivot.y - 0.25 + 8.0, 0.6), color.darkened(0.4))
+	var half := length * 0.5 - 0.4
+	for sgn in [-1.0, 1.0]:
+		var end := pivot + Vector3(half * cos(max_angle) * sgn, -half * sin(max_angle) - 0.15 / cos(max_angle), 0)
+		add_block(Vector3(end.x, end.y - 4.0, end.z), Vector3(0.6, 8.0, width * 0.6), color.darkened(0.4))
+	return plank
+
+
+## A straight sloping walkway `width` m wide from `from` to `to` (its top
+## surface's centre line).
+func add_ramp(from: Vector3, to: Vector3, width: float, color: Color) -> StaticBody3D:
+	var run := to - from
+	var body := StaticBody3D.new()
+	var along := run.normalized()
+	var side := along.cross(Vector3.UP).normalized()
+	var up := side.cross(along)
+	body.transform = Transform3D(Basis(along, up, side), (from + to) * 0.5 - up * 0.25)
+	var size := Vector3(run.length(), 0.5, width)
+	var mi := MeshInstance3D.new()
+	var bm := BoxMesh.new()
+	bm.size = size
+	mi.mesh = bm
+	mi.material_override = mat(color)
+	body.add_child(mi)
+	var cs := CollisionShape3D.new()
+	var shape := BoxShape3D.new()
+	shape.size = size
+	cs.shape = shape
+	body.add_child(cs)
+	add_child(body)
+	return body
 
 
 ## A door panel that slides down into the floor when open_door() is called.

@@ -28,7 +28,7 @@ const MEMORY_SNAP_SHARE := 0.2 ## ...or this share of the flap's size, if that's
 const SLIVER_AREA := 0.001 ## square metres: a crease shaving off less than this from a facet just misses it
 const VERTEX_AXIS_SNAP := 0.12 ## a crease passing this close to a paper corner goes through it
 const FLAT_SNAP := deg_to_rad(12.0)
-const RIGHT_SNAP := deg_to_rad(6.0)
+const RIGHT_SNAP := deg_to_rad(10.0)
 
 ## Fold kinds. A reverse fold works on a folded edge (layers joined at a spine):
 ## both sides of the tip swing about the same crease in opposite directions,
@@ -546,14 +546,18 @@ static func _hinge_axis(src: Array, gi: int, g: Vector3, t: Vector3):
 		# How folded is this edge? Folded flat (the flap lies back on its
 		# neighbour) is the classic unfold, so the hands may be sloppier there.
 		var dihedral := 1.0
+		var across := 0.0 # paper area on the other side of this edge
 		for j in src.size():
 			if j == gi:
 				continue
 			var other: Facet = src[j]
 			if not shared_edge(PackedVector2Array([e0, e1]), other.pts).is_empty():
 				dihedral = minf(dihedral, other.normal().dot(n))
+				across += absf(PaperGeometry.signed_area(other.pts))
 		if dihedral > 0.999:
 			continue # a flat, unfolded crease: nothing to swing about
+		if absf(PaperGeometry.signed_area(gf.pts)) > 1.5 * across:
+			continue # holding the big piece a flap is folded off: that's a new fold, not swinging it
 		var tolerance := 0.5 if dihedral < -0.999 else 0.25
 		var p := gf.at(e0)
 		var d := (gf.at(e1) - p).normalized()

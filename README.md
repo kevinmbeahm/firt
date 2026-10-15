@@ -15,11 +15,13 @@ Open this folder in Godot 4.3+ and press **F5** (main scene: `scenes/main.tscn`)
 | ...while holding: cycle fold type (fold / inside reverse / outside reverse / collapse) | **Tab** | **'** |
 | ...in collapse mode: next / previous way to collapse | **Space** / **C** | **/** / **;** |
 | Sheet handling (hold) | **R** or **RMB**: move = slide, Space = flip over, F/LMB = turn 45 deg | **,** (same combos) |
+| Pick up a prop (apple, weight block) | hold grab near it; raise / lower it with **Space** / **C**; release to put it down | hold **.**; **/** / **;** |
+| Carry a sheet together | one bean grabs an edge, the other grabs another edge while the first still holds it; walk to carry, raise / lower your end | (same) |
 
 Gamepads (device 0 = P1, device 1 = P2): left stick move, A jump/raise, B lower, X grab, Y fold type, RB sheet handling.
 Shared camera: mouse / right stick / Q-E to orbit. **Z** undo last fold, **Backspace** restart the room, **Page Up / Page Down** previous / next room, **Esc** release mouse, **F11** (or Alt+Enter) fullscreen. The view stretches to fill any window size.
 
-**Solo play:** **V** (or LB on P1's pad) swaps which bean you control. The bean you leave stands still but keeps holding whatever it was holding (and keeps its weight on the paper), so you can hold a flap up with one bean and do something else with the other. Swap back and the first bean keeps holding until you press grab (then letting go creases the fold). In two-player games, bean 2 goes back to P2 when P1 swaps back.
+**Solo play:** **V** (or LB on P1's pad) swaps which bean you control. The bean you leave stands still but keeps holding whatever it was holding (and keeps its weight on the paper), so you can hold a flap up with one bean and do something else with the other. Swap back and the first bean keeps holding until you press grab (then letting go creases the fold). In two-player games, bean 2 goes back to P2 when P1 swaps back. To carry a sheet alone, grab one edge, swap, and grab another edge with the other bean: the idle bean then walks and raises its hands in step with the one you drive. The **weight block** (70 kg, as heavy as a bean) stands in for a second bean on scales and seesaws.
 
 ## How folding works
 The paper is thin (3 cm) and folds like real paper, rigidly, at any angle:
@@ -50,6 +52,10 @@ The game is a series of puzzle rooms, one at a time; solving a room (both beans 
 1. **The Ramp.** Get both players to the flag on the 2.2 m ledge across a 7 m gap; too high to jump, too far to just slide the sheet across (it would tip into the void). Fold part of the big sheet up into a **ramp**, ride the sheet out until the ramp's tip reaches over the ledge so it's held up at both ends, and walk up. (Hint: whatever you stand on when you fold the far strip up comes up too.) The smaller sheet on the island is a free-folding sandbox: try a paper plane, or fold a strip in half and reverse-fold its tip.
 2. **Doorway: Square.** A glowing square is painted on a wall next to a locked door. Stand paper up against the wall so it fills the square (at least 90% covered, no more than 10% spilling outside) and the door opens. Fold the sheet in half on its printed line, stand half of it up on the other line, then slide it into place.
 3. **Doorway: House.** The same with a house shape. Fold the roof corners down while the paper's flat (they're out of reach once it stands up), then stand it up and slide it in.
+4. **Basket Run.** Six 15 kg apples on an upper terrace, a scale on the lower one that needs all six at once, and a long ramp between. The scale tips everything back up the hill if it's left part-loaded for 30 s, so ferrying apples one by one is too slow. Fold the sheet's sides up on the printed lines into a **trough**, roll the apples in, then carry it down the ramp together, one bean at each open end. Keep it level: tilt it and the apples roll out of the ends.
+5. **Counterweight Lift.** A long seesaw plank is the only way up to a high ledge. It rests with its near end down, a ramp to the ledge, but tips under you once you're past the middle unless its near end is weighed down. One bean (or the weight block) can hold it for the other, but the last one up needs a counterweight of apples, and loose apples roll off the slope: carry them up onto the plank's near end in a folded trough.
+
+**Props and plates.** Apples and the weight block are physics objects: they roll and slide, ride in folded paper, and slow you down while you carry them. Things resting in a sheet two beans are carrying move with it (as if friction held them; tilt it and they still roll), and the carried sheet follows the hands smoothly, so stepping up a ledge doesn't fling the load out. A carried sheet slips out of your hands if you pull its ends more than 1.5 m apart (or push them together), and either bean letting go drops it. Pressure plates weigh the props in the column above them, including props inside paper set down on them.
 
 ## Tests
 - `godot --headless -s tests/fold_model.gd` folds a paper plane step by step and checks layer-selective folds, partial angles, crease reuse, tear refusal, and inside/outside reverse folds.
@@ -58,6 +64,8 @@ The game is a series of puzzle rooms, one at a time; solving a room (both beans 
 - `godot --headless -s tests/paper_physics.gd` checks sheets rest, tip into the void when pushed over an edge, respawn, and tip under the players' weight.
 - `godot --headless -s tests/solve_level.gd` has bots solve room 1 (the Ramp) with real input actions (fold a ramp, ride the sheet out to the ledge, climb) and asserts the win condition.
 - `godot --headless -s tests/solve_doorways.gd` has bots solve both Doorway rooms with real input actions (fold on the printed lines, stand the paper up, slide it against the wall, walk through the door), and checks that paper spilling past the outline keeps the door shut.
+- `godot --headless -s tests/solve_carry_rooms.gd` has bots solve the Basket Run and the Counterweight Lift with real input actions (fold a trough, load apples, carry it together down a ramp or up onto the seesaw, walk to the flag), and checks the rules on the way: a part-loaded scale tips its apples back, the plank tips under a bean with nothing on its near end and can't be outrun, and a loose apple rolls off it.
+- `godot --headless -s tests/solo_carry.gd` carries a sheet solo with real inputs: grab one edge, swap, grab the other; the idle bean walks and lifts in step.
 - `godot --headless -s tests/solo_swap.gd` plays solo with real inputs: lift a flap with one bean, swap, walk the other bean while the first keeps holding, swap back and crease it.
 - `godot --headless -s tests/crane.gd` is the **benchmark**: it folds a traditional paper crane from an 8 m square in 32 steps with the game's own operations (precreases, square-base collapse, kite folds, petal folds, leg narrowing, inside reverse folds for a long neck and tail and a bent head, wing folds). After every step it checks the whole sheet: no tears, no paper through paper, no paper lost, a valid stacking. Then it checks the crane's shape: neck and tail rise well above the spread wings on opposite sides, and the head bends down off the neck. It prints a step table (about 150 facets, under 2 s of planning in total). `godot -s tests/crane.gd -- --shots=DIR` renders the finished crane from the side, three-quarters and above to `DIR` (needs a display).
 
@@ -70,11 +78,14 @@ The game is a series of puzzle rooms, one at a time; solving a room (both beans 
 - `scripts/level.gd` - hosts the rooms: loads them in order, players and solo swap, lighting, shared orbit camera, HUD, input map, undo
 - `scripts/room.gd` - base class for a puzzle room (terrain, sheets, goal, checkpoints, doors), with the rooms in `scripts/rooms/`
 - `scripts/shape_gate.gd` - an outline on a wall that opens when paper standing against it fills the shape
+- `scripts/prop.gd` - loose props (apples, crates, the weight block): pick up, carry, respawn
+- `scripts/pressure_plate.gd` - plates and scales that weigh the props on them
 
 ## Known limits / next steps
 - Crane benchmark limits (rigid paper only bends at creases): narrowing the legs also folds a small gusset into the layers above each leg, so the wings hinge where those gussets end, a little higher than a hand-folded crane's (wings 2.6 m long rather than 4 m). And a real crane puffs out its body as the wings open; here the body stays flat and the wings stand square to it.
 - Paper is rigid between creases: a whole sheet tips and falls, but a flap doesn't droop or bend under its own weight.
 - Fold collision checks the folded result (and, for ordinary folds, the flap's swing) against the world, but checks paper-against-paper only for the final position, so a flap can still swing through other paper on its way to a valid spot.
 - Flip turns a sheet 180 deg; there's no free 3D rotation yet (e.g. to stand a finished plane upright, or throw it).
+- The two-bean carry is kinematic: the sheet moves rigidly between the hands (it doesn't swing or sag), and only two beans can carry one sheet.
 - Local co-op only, shared camera.
 - Shape gates only have the outline-on-a-wall (profile) mode so far; the fit-box and footprint modes in the design doc aren't built yet.

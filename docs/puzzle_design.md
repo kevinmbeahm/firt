@@ -401,6 +401,14 @@ a difficulty rating from 1 to 5.
   up at the lip to stop them sliding (a "tray"), which is a nice
   intermediate answer.
 - **Systems:** S3, S4, S8. **Difficulty:** 3.
+- **As built (room 5):** redesigned around a **tipping ramp**. The plank rests
+  with its near end on the ground and its far end at the ledge, so it is
+  itself the way up, but it tips the moment a bean walks past the middle
+  (it leans back onto its near end by itself when empty, so it can't be
+  soft-locked). One bean or the weight block on the near end holds it for
+  the other; the last bean up needs a counterweight: eight 15 kg apples,
+  carried onto the plank's near end in a trough (loose apples roll off the
+  17 degree slope). Apples, not crates, and no rope.
 
 ---
 
@@ -527,4 +535,9 @@ with an earlier mechanic, then a "free" room with several valid solutions.
 | S2 shape gates (profile mode; fit-box and footprint modes not yet) | built |
 | P1 Ramp (room 1) | built |
 | P3 Doorway: square, house | built |
+| S3 pressure plates (and a scale that tips its load back) | built |
+| S4 loose props: apples (balls), crates, the solo weight block | built |
+| Two-player carry (kinematic; solo by swapping) | built |
+| P6 Basket Run (room 4) | built (trough version) |
+| P11 Counterweight Lift (room 5) | built (tipping-ramp version) |
 | Everything else | not started |

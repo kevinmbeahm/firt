@@ -18,6 +18,10 @@ const TWEEN_TIME := 0.4
 const AREAL_DENSITY := 0.6 ## kg per square metre of paper (it's giant paper)
 const SLIDE_ACCEL := 12.0
 const LOST_Y := -25.0 ## below this the sheet is lost in the void and respawns
+const CARRY_MAX_SPEED := 4.0 ## m/s: how fast a carried sheet follows the hands
+const CARRY_MAX_RISE := 1.0 ## m/s: ...rises or drops
+const CARRY_MAX_TURN := 1.2 ## rad/s: ...and turns
+const CARRY_STRETCH := 1.5 ## carriers' hands this much further apart (or closer) than their grips and it slips
 const CONTACT_SLOP := 0.02 ## overlaps shallower than this (a loaded sheet settling) don't block folds
 
 var paper_size := Vector2(18, 12)
@@ -29,7 +33,11 @@ var fold_status := "" ## why the current drag can't fold, for the HUD
 var _history: Array = []
 var _offsets: Array = []
 var _preview: Dictionary = {}
-var _held_still := false ## frozen for the duration of a fold drag
+var _held_still := false ## frozen for the duration of a fold drag or a carry
+var carriers: Array = [] ## the two beans carrying it, if it's being carried
+var _rider_vel := {} ## (carrying) prop -> the paper's velocity under it last frame
+var _carry_local: Array = [] ## where each carrier holds it (sheet-local)
+var _carry_basis := Basis.IDENTITY ## its orientation when they picked it up
 var _drag_side := 0 ## which side of its paper the flap being folded is on (+1 above, -1 below, 0 not far over yet)
 var _mesh_instance: MeshInstance3D
 var _crease: MeshInstance3D
@@ -100,6 +108,8 @@ func setup(size: Vector2, printed: Array = []) -> void:
 
 
 func reset_paper() -> void:
+	if not carriers.is_empty():
+		end_carry()
 	facets = PaperModel.make_sheet(paper_size, printed_creases)
 	_history.clear()
 	fold_owner = null
@@ -109,7 +119,134 @@ func reset_paper() -> void:
 
 
 func is_busy() -> bool:
-	return fold_owner != null or _tween_t < 1.0
+	return fold_owner != null or not carriers.is_empty() or _tween_t < 1.0
+
+
+# --- Carrying ------------------------------------------------------------------
+# Two beans holding one sheet carry it between them (kinematically, for now):
+# it keeps its shape and hangs between their hands, turning to follow them and
+# tilting when one holds their end higher than the other.
+
+## Whether bean `p` can take hold of this sheet as the second carrier (someone
+## else is already holding it mid-fold).
+func can_join_carry(p) -> bool:
+	return fold_owner != null and fold_owner != p and carriers.is_empty() and fold_owner.grabbing
+
+
+## The bean folding the sheet and bean `b` (grabbing sheet-local point
+## `b_local`) now carry it together; the fold in progress is dropped.
+func start_carry(b, b_local: Vector3) -> void:
+	var a = fold_owner
+	var a_local: Vector3 = a._grab_local
+	fold_owner = null
+	_preview = {}
+	_plan_key = []
+	fold_status = ""
+	_build_mesh(facets)
+	_crease.visible = false
+	freeze_mode = RigidBody3D.FREEZE_MODE_KINEMATIC
+	freeze = true
+	_held_still = true # let go of on end_carry
+	carriers = [a, b]
+	_rider_vel = {}
+	_carry_local = [a_local, b_local]
+	_carry_basis = global_basis
+	a.begin_carry(self, to_global(a_local))
+	b.begin_carry(self, to_global(b_local))
+
+
+## Both carriers let go; the sheet (and whatever's in it) drops from where it is.
+func end_carry() -> void:
+	var was: Array = carriers
+	carriers = []
+	_carry_local = []
+	for p in was:
+		p.end_carry()
+	_let_go()
+
+
+## Where the sheet hangs between the carriers' hands `h1`, `h2` (world): the
+## grabbed points go to the middle of the hands, turned to face along them
+## and tilted by the difference in their height.
+func _carry_pose(h1: Vector3, h2: Vector3) -> Transform3D:
+	var l1: Vector3 = _carry_local[0]
+	var l2: Vector3 = _carry_local[1]
+	var d0: Vector3 = _carry_basis * (l2 - l1)
+	var d := h2 - h1
+	var flat0 := Vector3(d0.x, 0.0, d0.z)
+	var flat := Vector3(d.x, 0.0, d.z)
+	var basis := _carry_basis
+	if flat0.length() > 0.01 and flat.length() > 0.01:
+		var yaw := flat0.signed_angle_to(flat, Vector3.UP)
+		basis = Basis(Vector3.UP, yaw) * basis
+		var tilt := atan2(d.y, flat.length()) - atan2(d0.y, flat0.length())
+		var side := Vector3.UP.cross(flat).normalized()
+		basis = Basis(side, -tilt) * basis
+	var mid_hands := (h1 + h2) * 0.5
+	return Transform3D(basis, mid_hands - basis * ((l1 + l2) * 0.5))
+
+
+func _update_carry() -> void:
+	var h1: Vector3 = carriers[0].carry_hands()
+	var h2: Vector3 = carriers[1].carry_hands()
+	var span: float = (_carry_local[1] - _carry_local[0]).length()
+	if absf(h1.distance_to(h2) - span) > CARRY_STRETCH:
+		end_carry() # pulled apart (or pushed together) too far: it slips out of their hands
+		return
+	var pose := _ease_toward(global_transform, _carry_pose(h1, h2))
+	# Solid things stop it (it can't be lowered into the ground or swung
+	# through a wall); the carriers' hands go on and it slips if they pull too far.
+	if not _hits_world({"moved": facets, "swept": false}, 1.0, pose):
+		_carry_riders(global_transform, pose)
+		global_transform = pose
+
+
+## The carried sheet follows the hands smoothly: arms are soft, so a carrier
+## stepping up a ledge doesn't jerk it (and fling out what's in it).
+func _ease_toward(from: Transform3D, to: Transform3D) -> Transform3D:
+	var dt := get_physics_process_delta_time()
+	var flat_from := Vector3(from.origin.x, 0.0, from.origin.z)
+	var origin := flat_from.move_toward(Vector3(to.origin.x, 0.0, to.origin.z), CARRY_MAX_SPEED * dt)
+	origin.y = move_toward(from.origin.y, to.origin.y, CARRY_MAX_RISE * dt)
+	var q0 := from.basis.get_rotation_quaternion()
+	var q1 := to.basis.get_rotation_quaternion()
+	var angle := q0.angle_to(q1)
+	var t := 1.0 if angle < 0.0001 else minf(1.0, CARRY_MAX_TURN * dt / angle)
+	return Transform3D(Basis(q0.slerp(q1, t)), origin)
+
+
+## Props resting in the carried paper speed up and slow down with it, as if
+## friction held them: kinematic paper otherwise slides out from under a ball,
+## which rolls out the back the moment the carriers set off. Tilt it and they
+## still roll.
+func _carry_riders(from: Transform3D, to: Transform3D) -> void:
+	var box := AABB()
+	var first := true
+	for q in _all_points():
+		if first:
+			box = AABB(q, Vector3.ZERO)
+			first = false
+		else:
+			box = box.expand(q)
+	box = box.grow(0.1)
+	box.position.y -= 0.5 # (the props sit on top of the paper)
+	box.size.y += 1.0
+	var inv := from.affine_inverse()
+	var dt := get_physics_process_delta_time()
+	var seen := {}
+	for p in get_tree().get_nodes_in_group("props"):
+		var prop: Prop = p
+		if prop.holder != null:
+			continue
+		var local := inv * prop.global_position
+		if not box.has_point(local):
+			continue
+		var v := (to * local - from * local) / dt
+		v.y = 0.0
+		var dv: Vector3 = v - _rider_vel.get(prop, Vector3.ZERO)
+		prop.nudge(dv.limit_length(1.0))
+		seen[prop] = v
+	_rider_vel = seen
 
 
 func _ready() -> void:
@@ -315,7 +452,7 @@ func _hits_world(plan: Dictionary, s: float, pose: Transform3D) -> bool:
 	var space := get_world_3d().direct_space_state
 	var query := PhysicsShapeQueryParameters3D.new()
 	var exclude: Array[RID] = [get_rid()]
-	for p in get_tree().get_nodes_in_group("players"):
+	for p in get_tree().get_nodes_in_group("players") + get_tree().get_nodes_in_group("props"):
 		exclude.append((p as CollisionObject3D).get_rid())
 	query.exclude = exclude
 	query.collision_mask = collision_mask
@@ -382,7 +519,9 @@ func _rotate_about_center(rot: Basis) -> void:
 
 
 func _physics_process(delta: float) -> void:
-	if _tween_t < 1.0:
+	if carriers.size() == 2:
+		_update_carry()
+	elif _tween_t < 1.0:
 		_tween_t = minf(_tween_t + delta / TWEEN_TIME, 1.0)
 		var s := smoothstep(0.0, 1.0, _tween_t)
 		global_transform = _tween_from.interpolate_with(_tween_to, s)
