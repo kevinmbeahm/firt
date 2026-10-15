@@ -160,9 +160,13 @@ static func plan_fold(src: Array, gi: int, g: Vector3, t: Vector3, up: Vector3, 
 	axis = axis.normalized()
 	var w := (u - n * n.dot(u)).normalized()
 	var a := g + w * (u.dot((g + t) * 0.5 - g) / u.dot(w))
-	# Re-folding along an existing crease (opening a wing, unfolding) should use
-	# that exact crease rather than shaving off slivers next to it.
-	var crease = _existing_crease(src, gf, a, axis)
+	# A flap folded at an existing crease swings about that crease when the
+	# hands roughly follow it (unfolding, opening a wing part-way), instead of
+	# needing the corner carried back to the exact spot.
+	var hinge = _hinge_axis(src, gi, g, t) if mode == FOLD_NORMAL else null
+	# Otherwise, a new crease that lands almost on an existing one reuses it
+	# rather than shaving off slivers next to it.
+	var crease = hinge if hinge != null else _existing_crease(src, gf, a, axis)
 	if crease != null:
 		a = crease[0]
 		axis = crease[1]
@@ -373,6 +377,52 @@ static func _segment_inside(p: Vector2, q: Vector2, poly: PackedVector2Array) ->
 		if t0 >= t1:
 			return 0.0
 	return (t1 - t0) * d.length()
+
+
+## The folded hinge of the grabbed facet that best carries g toward t, as
+## [point, direction], or null if no hinge comes close. Only creases that are
+## actually folded (the neighbour isn't lying flat beside us) count.
+static func _hinge_axis(src: Array, gi: int, g: Vector3, t: Vector3):
+	var gf: Facet = src[gi]
+	var n := gf.normal()
+	var c := gf.pts.size()
+	var best = null
+	var best_score := INF
+	for i in c:
+		var e0 := gf.pts[i]
+		var e1 := gf.pts[(i + 1) % c]
+		# How folded is this edge? Folded flat (the flap lies back on its
+		# neighbour) is the classic unfold, so the hands may be sloppier there.
+		var dihedral := 1.0
+		for j in src.size():
+			if j == gi:
+				continue
+			var other: Facet = src[j]
+			if not shared_edge(PackedVector2Array([e0, e1]), other.pts).is_empty():
+				dihedral = minf(dihedral, other.normal().dot(n))
+		if dihedral > 0.999:
+			continue # a flat, unfolded crease: nothing to swing about
+		var tolerance := 0.5 if dihedral < -0.999 else 0.25
+		var p := gf.at(e0)
+		var d := (gf.at(e1) - p).normalized()
+		var foot := p + d * d.dot(g - p)
+		var vg := g - foot
+		if vg.length() < 0.1:
+			continue # we're holding the hinge itself
+		var vt := t - foot
+		vt -= d * d.dot(vt)
+		var theta := atan2(d.dot(vg.cross(vt)), vg.dot(vt))
+		var swung := foot + Basis(d, theta) * vg
+		# The swing must account for most of where the hands went (a short pull
+		# along the flap is a new fold, not a hinge turn)...
+		if swung.distance_to(g) < 0.5 * t.distance_to(g):
+			continue
+		# ...and land close to them, relative to the flap's size.
+		var score := swung.distance_to(t) / vg.length()
+		if score < tolerance and score < best_score:
+			best_score = score
+			best = [p, d]
+	return best
 
 
 ## An edge in the grabbed plane lying almost on the proposed crease, as

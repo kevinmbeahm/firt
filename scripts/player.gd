@@ -51,6 +51,7 @@ func _a(action: String) -> String:
 
 
 func _ready() -> void:
+	add_to_group("players")
 	floor_snap_length = STEP_HEIGHT + 0.1
 	floor_max_angle = deg_to_rad(50.0)
 

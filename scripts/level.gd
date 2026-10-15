@@ -250,6 +250,14 @@ func _unhandled_input(event: InputEvent) -> void:
 			Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	elif event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	elif event is InputEventKey and event.pressed and not event.echo \
+			and (event.keycode == KEY_F11 or (event.keycode == KEY_ENTER and event.alt_pressed)):
+		toggle_fullscreen()
+
+
+func toggle_fullscreen() -> void:
+	var full := DisplayServer.window_get_mode() == DisplayServer.WINDOW_MODE_FULLSCREEN
+	DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED if full else DisplayServer.WINDOW_MODE_FULLSCREEN)
 
 
 ## Shared orbit camera that keeps both players in frame.
@@ -272,7 +280,7 @@ func _update_hud() -> void:
 	var text := "P1: WASD move  Space jump  |  hold F/LMB on a glowing corner, walk to move it, Space/C or wheel raise/lower hands, Tab fold type, release to crease\n"
 	text += "      hold R/RMB: move = slide sheet, Space = flip it over, F/LMB = turn it\n"
 	text += "P2: Arrows  / jump  . grab  ; lower  ' fold type  , sheet     Pads: A jump/raise  B lower  X grab  Y fold type  RB sheet\n"
-	text += "Mouse / right stick / Q E: camera   Z: undo fold   Backspace: restart   Esc: release mouse"
+	text += "Mouse / right stick / Q E: camera   Z: undo fold   Backspace: restart   Esc: release mouse   F11: fullscreen"
 	for p in players:
 		var st: String = p.fold_status()
 		if st != "":

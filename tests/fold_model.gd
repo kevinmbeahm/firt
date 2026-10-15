@@ -126,4 +126,26 @@ func _init() -> void:
 	var tilt := rad_to_deg((ramp.facets[1] as PaperModel.Facet).normal().angle_to(Vector3.UP))
 	check(ramp.ok and absf(tilt - 25.7) < 1.0, "raised hands give a partial fold (ramp at %.1f deg)" % tilt)
 	reverse_fold_tests()
+	unfold_tests()
 	quit(0 if ok else 1)
+
+
+## Unfolding: carrying a folded flap back only roughly should swing it about its
+## existing crease, not cut a new one.
+func unfold_tests() -> void:
+	var fs := PaperModel.make_sheet(Vector2(18, 12))
+	var r := fold(fs, Vector3(9, T, 0), Vector3(3, T, 0))
+	check(r.ok and r.facets.size() == 2, "fold a strip over (crease at x=6)")
+	fs = r.facets
+	var g := Vector3(3, T, 0)
+	for t in [Vector3(9, T, 0), Vector3(8.6, T, 0.5), Vector3(8, T, 1)]:
+		r = fold(fs, g, t)
+		var flat: bool = r.ok and r.facets.size() == 2
+		for f in r.get("facets", []):
+			flat = flat and f.normal().y > 0.999
+		check(flat, "carrying the flap back to %s unfolds it along the old crease (%d facets)" % [t, r.facets.size()])
+	r = fold(fs, g, Vector3(6, T + 3, 0))
+	check(r.ok and r.facets.size() == 2 and absf(r.facets[1].normal().y) < 0.01,
+		"lifting the flap opens it to stand upright on its crease")
+	r = fold(fs, g, Vector3(4, T, 0))
+	check(r.ok and r.facets.size() > 2, "a new fold on the flap itself still makes a new crease")

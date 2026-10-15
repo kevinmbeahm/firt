@@ -16,7 +16,7 @@ Open this folder in Godot 4.3+ and press **F5** (main scene: `scenes/main.tscn`)
 | Sheet handling (hold) | **R** or **RMB**: move = slide, Space = flip over, F/LMB = turn 45 deg | **,** (same combos) |
 
 Gamepads (device 0 = P1, device 1 = P2): left stick move, A jump/raise, B lower, X grab, Y fold type, RB sheet handling.
-Shared camera: mouse / right stick / Q-E to orbit. **Z** undo last fold, **Backspace** restart, **Esc** release mouse.
+Shared camera: mouse / right stick / Q-E to orbit. **Z** undo last fold, **Backspace** restart, **Esc** release mouse, **F11** (or Alt+Enter) fullscreen. The view stretches to fill any window size.
 
 ## How folding works
 The paper is thin (3 cm) and folds like real paper, rigidly, at any angle:
@@ -24,7 +24,7 @@ The paper is thin (3 cm) and folds like real paper, rigidly, at any angle:
 - Keep your hands low and carry a corner over to fold flat; lift them to leave the flap standing at an angle (ramps, walls, wings). Angles near 90 and 180 deg snap, and so do corners/creases you carry a point onto, so corner-to-corner and corner-to-crease folds are easy.
 - Release to make the crease permanent (Z undoes it).
 - Only the paper **connected** to what you grabbed moves. Fold a stack in half and you can still fold just the top flap: that's how you do a paper plane's wings. A fold that would need to tear paper that's joined elsewhere is refused (the crease line turns red and the HUD says why).
-- Re-folding along an existing crease reuses it exactly, so you can open wings back out or unfold.
+- **Unfolding:** grab a folded flap and carry it back roughly where it came from (or lift it part-way): it swings about its existing crease, so you don't need to put the corner back exactly. A new crease near an old one also snaps onto the old one rather than leaving slivers.
 - Paper is solid. A flap that runs into the ground or anything solid stops there and rests against it, the way real paper would; a near-flat fold that would have to go under a sheet lying on the floor goes over the top instead. Over the void you can fold a flap down to hang freely. A fold is only refused (red crease, reason in the HUD) when the flap can't move at all, or would end up passing through other paper. Corners buried under a layer on top can't be grabbed; flip the sheet to reach the other side.
 - **Reverse folds** (Tab / ' / Y while holding paper): on a folded edge (layers joined at a spine, e.g. a strip folded in half), the two sides of the tip swing about the same crease in opposite directions. An *inside reverse fold* tucks the tip between the layers (a crane's neck and tail); an *outside reverse fold* wraps it around them. They need a folded edge and are always flat.
 - Hold *sheet handling* to slide the whole sheet (riders are carried; if you're not on it you walk alongside), flip it over (to fold the other side) or turn it.
@@ -44,6 +44,7 @@ The smaller sheet on the island is a free-folding sandbox: try a paper plane, or
 ## Tests
 - `godot --headless -s tests/fold_model.gd` folds a paper plane step by step and checks layer-selective folds, partial angles, crease reuse, tear refusal, and inside/outside reverse folds.
 - `godot --headless -s tests/fold_physics.gd` checks folds against the world and the rigid body: flat folds near the floor go over the top, flaps rest on the ground instead of passing through it, hanging flaps over the void, no paper through paper, buried corners, undo/turn needing room, no steering falling sheets, clean grab release, respawn orientation.
+- `godot --headless -s tests/unfold_game.gd` folds a strip over with real inputs, then walks the flap back sloppily and checks it unfolds along the old crease.
 - `godot --headless -s tests/paper_physics.gd` checks sheets rest, tip into the void when pushed over an edge, respawn, and tip under the players' weight.
 - `godot --headless -s tests/solve_level.gd` has bots solve level 1 with real input actions (fold a ramp, ride the sheet out to the ledge, climb) and asserts the win condition.
 

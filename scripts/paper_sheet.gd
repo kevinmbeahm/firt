@@ -15,6 +15,7 @@ const TWEEN_TIME := 0.4
 const AREAL_DENSITY := 0.6 ## kg per square metre of paper (it's giant paper)
 const SLIDE_ACCEL := 12.0
 const LOST_Y := -25.0 ## below this the sheet is lost in the void and respawns
+const CONTACT_SLOP := 0.02 ## overlaps shallower than this (a loaded sheet settling) don't block folds
 
 var paper_size := Vector2(18, 12)
 var facets: Array = [] ## Array[PaperModel.Facet]
@@ -254,11 +255,15 @@ func _blocked_by_world(plan: Dictionary, pose: Transform3D = global_transform) -
 
 
 ## Does the moving paper of `plan`, `s` of the way through its swing, overlap
-## anything solid? (Players don't count.)
+## anything solid by more than CONTACT_SLOP? (Players don't count, and a sheet
+## pressed a few millimetres into the ground under someone's weight is fine.)
 func _hits_world(plan: Dictionary, s: float, pose: Transform3D) -> bool:
 	var space := get_world_3d().direct_space_state
 	var query := PhysicsShapeQueryParameters3D.new()
-	query.exclude = [get_rid()]
+	var exclude: Array[RID] = [get_rid()]
+	for p in get_tree().get_nodes_in_group("players"):
+		exclude.append((p as CollisionObject3D).get_rid())
+	query.exclude = exclude
 	query.collision_mask = collision_mask
 	query.transform = pose
 	var back := Transform3D.IDENTITY
@@ -267,8 +272,9 @@ func _hits_world(plan: Dictionary, s: float, pose: Transform3D) -> bool:
 		back = Transform3D(rot, plan.axis_a - rot * plan.axis_a)
 	for item in plan.moved:
 		query.shape = _probe(item, back)
-		for hit in space.intersect_shape(query, 4):
-			if not (hit.collider is CharacterBody3D):
+		var contacts := space.collide_shape(query, 16)
+		for i in range(0, contacts.size() - 1, 2):
+			if (contacts[i] as Vector3).distance_to(contacts[i + 1]) > CONTACT_SLOP:
 				return true
 	return false
 
