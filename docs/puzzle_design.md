@@ -1,7 +1,7 @@
 # Fold: Puzzle Design Plan
 
-Status: **design only**. Nothing in this document is implemented yet beyond what
-the README already describes. Numbers come from the current build (player
+Status: **design, partly built.** Section 9 records what's implemented. Decisions
+from review are folded into the text and summarised in section 8. Numbers come from the current build (player
 5 m/s, jump ~1.4 m, step-up 0.55 m, reach 2.4 m, hands lift -3..+3.2 m, player
 70 kg, paper 0.6 kg/m², so an 18 x 12 m sheet weighs about 130 kg).
 
@@ -66,16 +66,15 @@ Each puzzle in §5 lists which of these it needs. They're in rough build order
 
 | # | System | What it does | Used by |
 |---|---|---|---|
-| S1 | **Printed creases / sheet patterns** | Sheets can spawn with visible precrease lines (and optionally crease memory set as mountain/valley), plus coloured regions or targets printed on the paper | P2, P5, P8, P10, P12, P14 |
-| S2 | **Shape gates** | A volume or silhouette in the world (glowing outline) that checks whether a sheet's folded geometry fits: inside a box, covers a footprint, matches a profile within tolerance. Opens a door / lights a lamp / counts as a goal | P3, P4, P9, P10, P12 |
+| S1 | **Printed creases / sheet patterns** | Sheets can spawn with visible precrease lines (and optionally crease memory set as mountain/valley), plus coloured regions or targets printed on the paper | P2, P3, P5, P8, P12, P14, P15 |
+| S2 | **Shape gates** | A volume or silhouette in the world (glowing outline) that checks whether a sheet's folded geometry fits: inside a box, covers a footprint, matches a profile within tolerance. Opens a door / lights a lamp / counts as a goal | P3, P4, P10, P12, P15 |
 | S3 | **Pressure plates and weights** | Plates that trigger on mass (players, sheets, loose objects) | P6, P11, P13 |
 | S4 | **Loose props** | Physics objects you can push and carry (balls, crates, paper cups, pebbles); grabbing a prop uses the same grab button | P5, P6, P11 |
-| S5 | **Water** | Buoyancy for sheets (displaced volume from folded geometry, see §4.1), drag, a gentle current. Paper slowly gets *soggy* (optional timer) | P5, P7 |
+| S5 | **Water** | Buoyancy for sheets (displaced volume from folded geometry, see §4.1), drag, a gentle current. Paper never gets soggy | P5, P7 |
 | S6 | **Wind** | Fans and vents that push sheets based on their exposed area in the wind's direction (sail, plane, kite) | P8, P9, P14 |
 | S7 | **Cables / ziplines** | A rope between two anchors. A sheet folded over the rope with a crease along it hangs and slides along it (see §4.3) | P2 |
 | S8 | **Moving and rotating world parts** | Lifts, turntables, drawbridges, pulleys driven by plates or by weight | P11, P13 |
 | S9 | **Light and shadow** | Spotlights casting the sheet's shadow onto a wall; a shadow target counts as a shape gate in 2D | P10 |
-| S10 | **Scissors / tear lines** (late game, optional) | Perforated lines printed on a sheet that can be torn once, making two sheets | P15 |
 
 ---
 
@@ -146,16 +145,10 @@ dropping below the cable (an upside-down V). Then:
 ### 4.4 Stability and load
 
 "Will this platform hold?" is already physical: sheets tip over edges, and
-player weight counts. Two additions:
-
-- **Stiffness from folds**: a single flat layer spanning a gap sags and drops a
-  player once the span is too long (we can fake sag with a breaking rule: a
-  flat single-layer span longer than ~4 m gives way under a player). Folding
-  it into ridges (a corrugation, an L or a U) or doubling it up gives it
-  stiffness. This rewards real paper-engineering intuition: a folded beam is
-  stronger than a flat sheet.
-- **Crush**: stacks of loose props on a thin sheet bow it. Probably cut unless
-  stiffness is fun.
+player weight counts. **Paper doesn't sag or break** (decided in review): a
+single layer is as strong as a stack. Structural folds still matter for
+*shape* (walls that stop things sliding or blowing off, a channel that stays
+on a narrow path), and wind (S6) can flip a light, flat sheet.
 
 ---
 
@@ -213,23 +206,29 @@ a difficulty rating from 1 to 5.
 
 ### P3. "Shape of the Doorway"
 
-- **Setup:** a wall with a glowing **cut-out silhouette** of an arrowhead (a
-  triangle on a short stem), 3 m tall, at floor level. A 6 x 6 m sheet.
-  Behind the wall, the exit.
-- **Goal:** fill the doorway shape with paper. The gate (S2, profile mode)
-  opens when the sheet, pushed into the opening, covers it.
-- **Solution:** fold two corners to the centre line (the "kite" from the paper
-  plane), then fold the bottom up for the stem. Slide the sheet into the
-  outline standing upright: flip it on its edge using a partial 90° fold and
-  push.
-- **Co-op:** one holds the sheet upright against the wall (grab and lift)
-  while the other slides it into place.
-- **Series:** use the same gate in several rooms with different silhouettes:
-  a square (fold in half twice), a house (two corners down), a diamond (turn
-  45° first), and a crane outline as an end-game challenge. Shapes that need
-  cuts, like a star, are out.
-- **Teaches:** precise flat folds, standing sheets on edge.
-- **Systems:** S2. **Difficulty:** 2 (square) to 4 (crane outline).
+- **Setup:** a wall with a glowing **outline** painted on it at floor level
+  (a square first, later a house, an arrowhead, a diamond) and a locked door
+  beside it. A sheet lies on the floor in front of the wall, with a few
+  creases printed on it (S1) in early rooms.
+- **Goal:** stand paper up against the wall so that it fills the outline: it
+  must cover at least 90% of the shape, with no more than 10% spilling
+  outside it (S2, profile mode, looking straight at the wall). The door then
+  opens; reach the flag behind it.
+- **Solution (square, 3 x 3 m, 6 x 6 m sheet):** fold the sheet in half to
+  3 x 6, slide it against the wall, then lift the half nearest the wall
+  straight up (a partial 90° fold along the printed crease). Lifting a 6 m
+  wide half instead spills over the outline, so the first fold matters.
+- **Solution (house):** fold the two top corners down along the printed roof
+  lines while the sheet is still flat (the top is out of reach once it stands
+  up), then stand it up the same way.
+- **Co-op:** one player holds the standing flap at 90° (holding a grab keeps
+  the fold live) while the other nudges the sheet sideways to line it up with
+  the outline. Solo: hold the flap, swap characters, nudge.
+- **Series:** square, house, then later an arrowhead, a diamond (turn 45°
+  first), and a crane outline as an end-game challenge. Shapes that need cuts,
+  like a star, are out.
+- **Teaches:** precise flat folds, standing sheets on edge, partial folds.
+- **Systems:** S1, S2. **Difficulty:** 1 (square) to 4 (crane outline).
 
 ---
 
@@ -241,16 +240,15 @@ a difficulty rating from 1 to 5.
   other side.
 - **Solution:** fold it down small enough to fit: fold in half three times
   into a 2 x 8 m strip, then turn it to line up with the tunnel. The sheet must
-  pass the fit box (S2) of the tunnel physically: it's pushed through, and the
-  tunnel collides like any wall. Unfold on the other side (unfolding is the
-  new skill: undo isn't available because the sheet left its "fold zone", see
-  note) and refold as a ramp.
+  pass through the tunnel physically: it's pushed through, and the tunnel
+  collides like any wall. On the other side, unfold it (by hand or with undo:
+  undo is unlimited, decided in review) and refold it as a ramp. Undo needs
+  room to swing the paper back out, so unfolding inside the tunnel is refused.
 - **Co-op:** pushing a long strip through a tunnel needs one player each end
   (the sheet has to be turned 45° to get round a bend inside).
-- **Note:** we want a rule that **undo only works on the last fold made in
-  this room**, so players learn to unfold by hand.
-- **Teaches:** folding *down* (compact shapes), unfolding by hand, turning.
-- **Systems:** none new (S2 optional for feedback). **Difficulty:** 3.
+- **Teaches:** folding *down* (compact shapes), turning, planning a fold
+  sequence you'll want to reverse.
+- **Systems:** none new (S2 optional for feedback). **Difficulty:** 2.
 
 ---
 
@@ -272,14 +270,14 @@ a difficulty rating from 1 to 5.
   balancing). One must stand in the middle while the other climbs in. The
   crate makes three loads to balance.
 - **Alternate solutions:**
-  - A **raft** (flat sheet, or doubled for stiffness) floats players but the
+  - A **raft** (a flat or doubled sheet) floats players but the
     crate swamps it (no rim; §4.1). Players can cross on a raft, then the
     crate can't come, and the far door needs the crate on a plate (S3). So the
     raft gets you halfway: a good "aha".
   - A **box** (masu) holds more but steers worse (it spins in the current).
     Allowed.
 - **Failure:** a leaky hull (a gap in the rim loop) sinks in seconds; the
-  sheet washes over the falls and respawns soggy-flat on the start dock.
+  sheet washes over the falls and respawns, with its folds, on the start dock.
 - **Systems:** S1, S3, S4, S5. **Difficulty:** 3.
 
 ---
@@ -355,7 +353,7 @@ a difficulty rating from 1 to 5.
   pier is upwind at a diagonal. Two sheets: one big for a hull, one small.
 - **Goal:** reach the upwind pier.
 - **Solution:** boat from the big sheet (P5). Fold the small sheet into a
-  **sail** with a stiff fold (a vertical crease gives it a mast-like spine)
+  **sail** with a spine fold (a vertical crease gives it a mast-like edge)
   and stand it up in the boat (it's held upright by a partial 90° fold whose
   foot is pinned under a player's weight). Turning the sail 45° to the wind
   (the turn action) tacks the boat diagonally; wind force is applied along the
@@ -411,18 +409,18 @@ a difficulty rating from 1 to 5.
   both lips: the bridge must land on both marked pads. Wind gusts (S6) every
   few seconds. A 10 x 14 m sheet.
 - **Goal:** cross.
-- **Solution:** a flat 14 m strip would bridge it but the single layer sags
-  (stiffness rule, §4.4) and the gusts flip it. Fold the long edges up into a
-  **U-channel** (two partial 90° folds along the length): stiff, narrow enough
-  to cut the wind, and the walls keep players from being blown off. Slide it
+- **Solution:** a flat 14 m strip would bridge it, but the gusts lift and flip
+  a flat sheet and blow players off it. Fold the long edges up into a
+  **U-channel** (two partial 90° folds along the length): narrower, so it
+  catches less wind, with walls that keep players from being blown off. Slide it
   across with one player riding the back end as a counterweight (P1 skill).
 - **Co-op:** counterweight while sliding; then the first across holds the far
   end down in the gusts while the second crosses.
-- **Alternate:** a doubled flat strip (folded in half lengthwise) is stiff
-  enough but too narrow to walk in the wind without the walls: allowed but
-  risky.
-- **Teaches:** folds as structure (the channel/beam idea).
-- **Systems:** S2 (footprint), S6, stiffness rule. **Difficulty:** 4.
+- **Alternate:** a doubled flat strip (folded in half lengthwise) is heavier,
+  so it flips less, but walking it in the wind without walls is risky:
+  allowed.
+- **Teaches:** folds as structure (the channel idea).
+- **Systems:** S2 (footprint), S6. **Difficulty:** 4.
 
 ---
 
@@ -462,20 +460,7 @@ a difficulty rating from 1 to 5.
 
 ---
 
-### P15. "Two From One" (late game)
-
-- **Setup:** two goals far apart that each need a sheet at the same time (a
-  bridge here, a boat there), but only one big sheet. It has a perforated
-  line printed across it (S10).
-- **Goal:** both goals at once (both players at separate exits).
-- **Solution:** fold the sheet so the perforation lies along a crease, then
-  pull the two halves apart (tearing along the perforation), giving two
-  sheets. Then build both. Tearing is one-way, with no undo: plan first.
-- **Systems:** S10. **Difficulty:** 4.
-
----
-
-### P16. "Crane Gate" (finale)
+### P15. "Crane Gate" (finale)
 
 - **Setup:** the final hall has a crane-shaped silhouette gate (S2, profile
   plus fit) and a square sheet with only the diagonals and midlines printed.
@@ -499,7 +484,7 @@ a difficulty rating from 1 to 5.
 | 3. The River | Water | P5 Paper Boat, P7 Ferry, P9 Sail Away | buoyancy, leaks, balance, building on moving platforms |
 | 4. The Sky | Wind | P8 Paper Plane Post, P14 Kite, P2 Zipline (and its variant) | lift, throwing, hanging on cables |
 | 5. The Studio | Precision | P10 Shadow Play, P12 Bridge to Spec, P3 Doorway (arrowhead, diamond) | silhouettes, structural folds |
-| 6. The Workshop | Mastery | P15 Two From One, P16 Crane Gate | tearing, complex models |
+| 6. The Workshop | Mastery | P15 Crane Gate | complex models |
 
 Each chapter starts with a one-mechanic room, then a room that combines it
 with an earlier mechanic, then a "free" room with several valid solutions.
@@ -509,7 +494,7 @@ with an earlier mechanic, then a "free" room with several valid solutions.
 ## 7. Build priority (suggested)
 
 1. **S1 printed creases + S2 shape gates.** Cheap, they reuse the existing
-   fold model, and they unlock P3, P10 (with S9), P12 and P16, so a whole
+   fold model, and they unlock P3, P10 (with S9), P12 and P15, so a whole
    precision chapter can be made before any new physics.
 2. **S4 props + S3 plates + two-player carry.** These unlock the Garden
    chapter (P6, P11).
@@ -517,28 +502,28 @@ with an earlier mechanic, then a "free" room with several valid solutions.
 4. **S5 water.** The biggest new system (slice-based capacity, buoyancy,
    current); the River chapter depends on it.
 5. **S6 wind** (normal-based force on facets) and the throw action.
-6. **S8, S9, S10** as needed per level.
+6. **S8 and S9** as needed per level.
 
-## 8. Open questions
+## 8. Decisions from review
 
-- **Stiffness:** do we fake sag with a breaking rule (§4.4), or skip it and
-  use gusts or loads instead? Faking it risks feeling arbitrary.
-    - Skip this. No paper sag or breaking.
-- **Capacity check cost:** slicing a 150-facet model each physics tick is
-  heavy. Compute it once when a fold is committed and cache it; only buoyancy
-  (waterline vs. that cached profile) runs per tick.
-     - Compute it once and cache it makes sense.
-- **Undo scope:** per-room undo (P4 note) or unlimited? Unlimited undo makes
-  "fold it small, then unfold" trivial.
-    - Unlimited would be best.
-- **Two-player carry:** does a sheet held by two players move as a kinematic
-  object between their hands, or stay physical with springs at each grab?
-  Springs are more Human-Fall-Flat-like (wobbly, fun) but harder to tune.
-     - Start with kinematic
-- **Soggy paper:** a timer on wet paper adds urgency to the River chapter, but
-  could frustrate. Prototype it with and without.
-    - No soggy paper mechanic
-- **Single-player:** every puzzle above needs two players somewhere. Do we
-  support solo play (an AI partner, or a "weight" prop to stand in for the
-  second player)?
-    - Weight prop or swapping between two characters. Do not develop an AI partner
+| Question | Decision |
+|---|---|
+| Paper stiffness / sag | None. Paper doesn't sag or break (§4.4). |
+| Capacity check cost | Compute capacity once when a fold is committed and cache it; only the waterline test runs every tick. |
+| Undo scope | Unlimited. |
+| Two-player carry | Kinematic first (the sheet moves rigidly between the two holders' hands); springs later if it feels stiff. |
+| Soggy paper | No. |
+| Tearing | No tearing mechanic (S10 and the old "Two From One" puzzle are cut). |
+| Single player | A weight prop (a block as heavy as a player) and swapping control between the two characters. An idle character keeps holding whatever it was holding and keeps its weight. No AI partner. |
+
+## 9. Implementation status
+
+| Item | Status |
+|---|---|
+| Rooms: one level made of puzzle rooms, with restart per room, checkpoints and room-local goals | built |
+| Solo character swap | built |
+| S1 printed creases | built |
+| S2 shape gates (profile mode) | built |
+| P1 Ramp (room 1) | built |
+| P3 Doorway: square, house | built |
+| Everything else | not started |
