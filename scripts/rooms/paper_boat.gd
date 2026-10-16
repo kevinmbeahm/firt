@@ -4,7 +4,8 @@ extends Room
 ## can't swim. Fold the sheet into a tray on its printed lines (both sides up,
 ## then both ends: the corners tuck into gussets, so it's watertight), slide
 ## it down the slipway, load the crate, climb in and paddle across (sheet
-## handling) before the current takes you over the falls. A flat sheet floats
+## handling) before the current takes you over the falls. Run it aground on
+## the far beach and climb out. A flat sheet floats
 ## as a raft that holds both beans, but not with the crate as well.
 
 const BANK_Y := 0.4
@@ -23,7 +24,8 @@ func build() -> void:
 	cam_yaw = -PI * 0.5 # looking across the river (+X); it flows to the right (+Z)
 	var grass := Color(0.5, 0.64, 0.42)
 	add_block(Vector3((-26 + RIVER_X.x) * 0.5, BANK_Y - 2, 0), Vector3(RIVER_X.x + 26, 4, 32), grass) # start bank
-	add_block(Vector3((RIVER_X.y + 26) * 0.5, BANK_Y - 2, 0), Vector3(26 - RIVER_X.y, 4, 32), grass) # far bank
+	add_block(Vector3((RIVER_X.y + 3.0 + 26) * 0.5, BANK_Y - 2, 0), Vector3(26 - RIVER_X.y - 3.0, 4, 32), grass) # far bank, x 13..26
+	add_ramp(Vector3(RIVER_X.y - 2.5, -1.0, 0), Vector3(RIVER_X.y + 3.0, BANK_Y, 0), 32.0, Color(0.85, 0.78, 0.55)) # its beach
 	add_block(Vector3((RIVER_X.x + RIVER_X.y) * 0.5, -4.25, 0), Vector3(RIVER_X.y - RIVER_X.x, 0.5, 32), Color(0.45, 0.4, 0.3)) # river bed
 	river = add_water(Vector3((RIVER_X.x + RIVER_X.y) * 0.5, 0, 0), Vector2(RIVER_X.y - RIVER_X.x, 32), 4.0, CURRENT, true)
 	add_ramp(Vector3(-8.0, BANK_Y, -8), Vector3(-3.5, -1.2, -8), 9.0, Color(0.55, 0.45, 0.35)) # slipway
