@@ -66,12 +66,10 @@ var _swing_v := 0.0
 var _swing_hang := 0.0 ## the swing at which its centre of mass is right below the cable
 var _swing_r := 1.0 ## how far its centre of mass is from the cable
 var water: Water = null ## the water it's floating in, if any
-var swamped := false ## water got in over the rim (or through a gap): its hull holds nothing up
 var dry_volume := 0.0 ## the dry space its hull keeps under the waterline, m^3
 var _hull: Hull = null
 var _dry_center := Vector3.ZERO ## (sheet-local)
 var _dry_frame := 0
-var _out_of_water := 0.0
 var _sunk := 0.0
 var _wet := 0.0
 var _drag_side := 0 ## which side of its paper the flap being folded is on (+1 above, -1 below, 0 not far over yet)
@@ -496,7 +494,6 @@ func respawn() -> void:
 		end_carry()
 	if fold_owner != null:
 		cancel_fold()
-	swamped = false
 	_respawn = true
 	sleeping = false
 
@@ -504,25 +501,22 @@ func respawn() -> void:
 # --- Water (S5) ----------------------------------------------------------------
 # Paper floats two ways: on the dry space a folded hull keeps under the
 # waterline (Hull: water pours in over a rim or through a gap, and then it's
-# swamped until it's out of the water again), and as a thin raft (a little lift
+# then it holds nothing up), and as a thin raft (a little lift
 # per square metre of paper lying in the water). The water drags it along with
 # its current and damps its bobbing. Sheet handling paddles it.
 
 func _update_water(delta: float) -> void:
 	if freeze:
 		water = null
+		dry_volume = 0.0
 		return
 	var box := world_box()
-	var w := Water.find(get_tree(), global_position + box.get_center())
+	var w := Water.find_box(get_tree(), AABB(global_position + box.position, box.size))
 	if w == null or global_position.y + box.position.y > w.surface() + 0.05:
 		water = null
 		dry_volume = 0.0
-		_out_of_water += delta
-		if _out_of_water > 1.0:
-			swamped = false
 		return
 	water = w
-	_out_of_water = 0.0
 	sleeping = false # (the water never stops pushing)
 	var surf := w.surface()
 	# Sunk without a trace: back to where it started.
@@ -547,7 +541,7 @@ func _update_water(delta: float) -> void:
 		var at := Vector3.ZERO
 		for q in pts:
 			var p := to_global(f.at(q) + off)
-			var k := clampf((surf - p.y) / 0.1 + 0.5, 0.0, 1.0)
+			var k := clampf((surf - p.y) / 0.1 + 0.5, 0.0, 1.0) if w.over(p) else 0.0
 			part += k
 			at += p * k
 		if part <= 0.0:
@@ -562,12 +556,10 @@ func _update_water(delta: float) -> void:
 		_dry_frame = 0
 	if _dry_frame % 3 == 0:
 		var d := _hull.dry(global_transform, surf)
-		if dry_volume > 0.5 and d.volume < dry_volume * 0.3:
-			swamped = true # the water poured in
 		dry_volume = d.volume
 		_dry_center = to_local(d.center)
 	_dry_frame += 1
-	if not swamped and dry_volume > 0.0:
+	if dry_volume > 0.0:
 		apply_force(Vector3.UP * Water.DENSITY * dry_volume * g, to_global(_dry_center) - global_position)
 	_wet = minf(wet_area / 4.0, 1.0) # (how firmly the water has hold of it, 0..1)
 	apply_central_force(-Vector3.UP * linear_velocity.y * WATER_HEAVE_DAMP * wet_area)
@@ -578,8 +570,6 @@ func _update_water(delta: float) -> void:
 func water_status() -> String:
 	if water == null:
 		return ""
-	if swamped:
-		return "swamped: the water got in"
 	if dry_volume > 0.05:
 		return "afloat on %.1f m3 of dry hull" % dry_volume
 	return "afloat as a raft"
@@ -891,8 +881,10 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 	if _push_velocity != null and water != null:
 		# Afloat: paddle it, relative to the current.
 		var want: Vector3 = water.current + _push_velocity * PADDLE_SPEED
-		var h := Vector3(v.x, 0.0, v.z).move_toward(Vector3(want.x, 0.0, want.z), PADDLE_ACCEL * state.step)
-		state.linear_velocity = Vector3(h.x, v.y, h.z)
+		# (Ramp a commanded speed, as when sliding on land, so a boat sitting
+		# on a shelf or a beach is pushed off it rather than held by friction.)
+		_slide = _slide.move_toward(Vector3(want.x, 0.0, want.z), PADDLE_ACCEL * state.step)
+		state.linear_velocity = Vector3(_slide.x, v.y, _slide.z)
 		var w0 := state.angular_velocity
 		state.angular_velocity = w0 - Vector3.UP * w0.dot(Vector3.UP)
 		_push_velocity = null

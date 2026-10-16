@@ -54,6 +54,18 @@ func over(p: Vector3) -> bool:
 	return absf(q.x) <= size.x * 0.5 and absf(q.z) <= size.y * 0.5 and q.y > -depth
 
 
+## The water any part of `box` (world) is over, if any.
+static func find_box(tree: SceneTree, box: AABB) -> Water:
+	for n in tree.get_nodes_in_group("waters"):
+		var w := n as Water
+		var q := w.global_position
+		if box.position.x <= q.x + w.size.x * 0.5 and box.end.x >= q.x - w.size.x * 0.5 \
+				and box.position.z <= q.z + w.size.y * 0.5 and box.end.z >= q.z - w.size.y * 0.5 \
+				and box.end.y > q.y - w.depth:
+			return w
+	return null
+
+
 ## The water under (or around) `p`, if any.
 static func find(tree: SceneTree, p: Vector3) -> Water:
 	for w in tree.get_nodes_in_group("waters"):

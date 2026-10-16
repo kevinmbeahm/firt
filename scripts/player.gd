@@ -20,6 +20,7 @@ const ARM_LEN := 0.75
 const MAX_ARM_STRETCH := 2.6
 const PROP_LIFT := Vector2(-1.0, 1.6) ## how far a carried prop can be lowered/raised
 const HANG := 2.1 ## hanging on, your hands are this far above your feet
+const WADE_DEPTH := 0.6 ## beans can wade this deep, no deeper
 const HOP_SPEED := 4.0 ## letting go of a ride while pushing the stick hops you off that way
 
 var id := 1
@@ -60,6 +61,9 @@ var _tilt := Vector2.ZERO
 var _tilt_vel := Vector2.ZERO
 var _yaw := 0.0
 var _wet := 0.0 ## how long you've been in deep water
+var _boat: PaperSheet = null ## the floating sheet you're standing in, if any
+var _boat_rel := Vector3.ZERO ## (in a boat) your walking velocity, relative to it
+var _boat_jump := 0.0 ## (just jumped out of a boat) seconds before you can stand in one again
 
 
 func _a(action: String) -> String:
@@ -248,6 +252,7 @@ func _mat(c: Color) -> StandardMaterial3D:
 
 func respawn() -> void:
 	release()
+	_leave_boat()
 	_teleport(spawn)
 
 
@@ -338,6 +343,10 @@ func _physics_process(delta: float) -> void:
 			var dir := _axis("lower", "jump")
 			nudge_lift(dir * LIFT_SPEED * delta)
 
+	if _on_boat(delta, target, handling_sheet):
+		_update_grab(handling_sheet)
+		return
+
 	if is_on_floor():
 		velocity.y = maxf(velocity.y, 0.0)
 		if _just("jump") and not grabbing and held_prop == null and not handling_sheet:
@@ -355,12 +364,93 @@ func _physics_process(delta: float) -> void:
 		respawn()
 
 
-## Beans can't swim: in over your knees, you flounder, the current takes
+## Standing in a floating sheet (a boat, a raft). A character is an immovable
+## obstacle to a physics body, so a bean standing on a floating sheet would
+## pin it down and, as the floor dips under your feet, ratchet it under. So
+## while you're in it the sheet's paper ignores your body: you stand on its
+## floor (found with a ray), walk relative to it, its walls stop you, and your
+## weight presses on it as a force. Jump to get out. Returns false when you're
+## not in a floating sheet.
+func _on_boat(delta: float, target: Vector3, handling_sheet: bool) -> bool:
+	_boat_jump = maxf(_boat_jump - delta, 0.0)
+	var hit := _floor_hit(1.0)
+	var boat := hit.get("collider") as PaperSheet
+	var leaving := boat == null or boat.water == null or boat.freeze or _boat_jump > 0.0 \
+			or global_position.y - (hit.position as Vector3).y > 0.25
+	if leaving:
+		_leave_boat()
+		return false
+	if _boat != boat:
+		_leave_boat()
+		_boat = boat
+		_boat_rel = Vector3(velocity.x, 0.0, velocity.z) - boat.linear_velocity
+		_boat_rel.y = 0.0
+		add_collision_exception_with(boat)
+	var feet := global_position
+	var pv := boat.linear_velocity + boat.angular_velocity.cross(feet - boat.global_position)
+	_boat_rel = _boat_rel.move_toward(Vector3(target.x, 0.0, target.z), GROUND_ACCEL * delta)
+	var before := global_position
+	velocity = Vector3(pv.x + _boat_rel.x, 0.0, pv.z + _boat_rel.z)
+	move_and_slide() # (against everything but the boat)
+	if _in_boat_wall(boat):
+		# Its side: go with it, no further, and ease back off the paper.
+		var inward := boat.to_global(boat.center_of_mass) - global_position
+		inward.y = 0.0
+		global_position = before + Vector3(pv.x, 0.0, pv.z) * delta + inward.normalized() * 0.03
+		_boat_rel = Vector3.ZERO
+	var under := _floor_hit(1.0)
+	if under.get("collider") == boat and (under.normal as Vector3).y > 0.7 and absf((under.position as Vector3).y - global_position.y) < 0.3:
+		global_position.y = (under.position as Vector3).y
+	velocity = Vector3(pv.x + _boat_rel.x, pv.y, pv.z + _boat_rel.z)
+	_floor_body = boat
+	boat.apply_force(Vector3.DOWN * WEIGHT, global_position - boat.global_position)
+	if _just("jump") and not grabbing and held_prop == null and not handling_sheet:
+		velocity.y = JUMP_SPEED
+		global_position.y += 0.05
+		_boat_jump = 0.5 # (until you're well clear of its floor)
+		_leave_boat()
+	return true
+
+
+## On your feet: on the ground, or standing in a boat.
+func standing() -> bool:
+	return is_on_floor() or _boat != null
+
+
+func _leave_boat() -> void:
+	if _boat != null:
+		if is_instance_valid(_boat):
+			remove_collision_exception_with(_boat)
+		_boat = null
+
+
+## What's under your feet (within `reach` below your knees).
+func _floor_hit(reach: float) -> Dictionary:
+	var from := global_position + Vector3.UP * 0.5
+	var q := PhysicsRayQueryParameters3D.create(from, from + Vector3.DOWN * (0.5 + reach), collision_mask, [get_rid()])
+	return get_world_3d().direct_space_state.intersect_ray(q)
+
+
+## Whether your body (clear of the floor) overlaps the boat's paper: a side.
+func _in_boat_wall(boat: PaperSheet) -> bool:
+	var q := PhysicsShapeQueryParameters3D.new()
+	q.shape = _body_shape.shape
+	q.transform = Transform3D(Basis(), global_position + Vector3.UP * (_body_shape.position.y + 0.2))
+	q.collision_mask = collision_mask
+	q.exclude = [get_rid()]
+	for r in get_world_3d().direct_space_state.intersect_shape(q, 8):
+		if r.collider == boat:
+			return true
+	return false
+
+
+## Beans can't swim: in deeper than WADE_DEPTH, you flounder, the current takes
 ## you, and you're soon back at your respawn point.
 func _in_water(delta: float) -> bool:
 	var w := Water.find(get_tree(), global_position)
-	if w == null or global_position.y > w.surface() - 0.4:
-		_wet = 0.0
+	var boat := _floor_body as PaperSheet
+	if w == null or global_position.y > w.surface() - WADE_DEPTH or (boat != null and boat.water != null):
+		_wet = 0.0 # (dry, or standing in a boat that's afloat, however low it sits)
 		return false
 	_wet += delta
 	if _wet > 0.8:
@@ -620,7 +710,7 @@ func _process(delta: float) -> void:
 
 	_phase += speed * delta * 2.4
 	var swing := sin(_phase) * clampf(speed / SPEED, 0.0, 1.0)
-	var airborne := not is_on_floor()
+	var airborne := not standing()
 	for i in 2:
 		var s := 1.0 if i == 0 else -1.0
 		var leg: Node3D = _legs[i]

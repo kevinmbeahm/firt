@@ -113,7 +113,7 @@ func run() -> void:
 	s._refresh()
 	put(s, mid)
 	await frames(360)
-	check(s.water != null and lowest(s) > -0.3 and not s.swamped, "the tray floats (bottom at %.2f m; %.2f m3 of dry hull)" % [lowest(s), s.dry_volume])
+	check(s.water != null and lowest(s) > -0.3, "the tray floats (bottom at %.2f m; %.2f m3 of dry hull)" % [lowest(s), s.dry_volume])
 	for pid in [1, 2]:
 		bean(pid).place(s.global_position + Vector3(pid * 2 - 3, 0.3, -1))
 	crate.global_position = s.global_position + Vector3(0, 0.8, 1.5)
@@ -121,7 +121,7 @@ func run() -> void:
 	crate.sleeping = false
 	await frames(480)
 	var top := s.global_position.y + s.world_box().end.y
-	check(not s.swamped and top > 0.5 and s.dry_volume > 0.2, "with both beans and the crate in it, it rides high on its hull (rim %.2f m above the water, %.2f m3 dry)" % [top, s.dry_volume])
+	check(top > 0.5 and s.dry_volume > 0.2, "with both beans and the crate in it, it rides high on its hull (rim %.2f m above the water, %.2f m3 dry)" % [top, s.dry_volume])
 	check(bean(1).global_position.y > -0.3 and bean(2).global_position.y > -0.3, "no one's wet (feet at %.2f, %.2f m)" % [bean(1).global_position.y, bean(2).global_position.y])
 	room.river.current = room.CURRENT
 	var z0 := s.global_position.z

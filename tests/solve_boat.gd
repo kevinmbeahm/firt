@@ -223,7 +223,7 @@ func jump_to(pid: int, goal: Vector2, at: float) -> void:
 		if d.length() < 0.3:
 			break
 		stick(pid, d.normalized())
-		if d.length() < at and bean(pid).is_on_floor():
+		if d.length() < at and bean(pid).standing():
 			Input.action_press("p%d_jump" % pid)
 			await frames(2)
 			Input.action_release("p%d_jump" % pid)
@@ -245,6 +245,19 @@ func floor_corner(s: PaperSheet) -> Vector3:
 		if p.x > best.x:
 			best = p
 	return best
+
+
+## Walks bean `pid` up to prop `p` (it may be pushed along on the way) until
+## it's within `reach` of it.
+func approach(pid: int, p: Prop, reach: float) -> void:
+	for i in 900:
+		var d := flat(p.global_position) - flat(bean(pid).global_position)
+		if d.length() < reach + p.size:
+			break
+		stick(pid, d.normalized() * 0.5)
+		await physics_frame
+	stick(pid, Vector2.ZERO)
+	await frames(15)
 
 
 func in_boat(pid: int) -> bool:
@@ -302,27 +315,27 @@ func run() -> void:
 		if s.water != null:
 			afloat = true
 		still = still + 1 if afloat and s.global_position.x > 0.0 and absf(s.linear_velocity.x) < 0.05 else 0
-		if still > 60:
+		if still > 60 or (afloat and floor_corner(s).x > room.RIVER_X.y - 1.0):
 			break # aground on the beach
 	stick(1, Vector2.ZERO)
 	Input.action_release("p1_sheet")
 	await frames(60)
-	check(afloat and not s.swamped, "it floats (%s)" % s.water_status())
+	check(afloat, "it floats")
 	var corner := floor_corner(s)
 	check(corner.x > room.RIVER_X.y - 2.5, "they paddle it across and run it aground on the far beach (its nearest corner at x=%.1f)" % corner.x)
 	check(in_boat(1) and in_boat(2), "both still aboard, dry")
 	await snap("boat_across")
 
 	# 5. P2 lifts the crate out onto the bank; both climb out.
-	var cp := flat(room.crate.global_position)
-	await walk(2, cp - Vector2(1.2, 0), 0.25)
+	await approach(2, room.crate, 1.0)
 	Input.action_press("p2_grab")
 	await frames(5)
 	check(bean(2).held_prop == room.crate, "P2 picks the crate up in the boat")
 	await lift_to(2, 1.0)
 	# To the corner nearest the beach (it turned on the way), and over the side.
+	corner = floor_corner(s)
 	var inward := (flat(s.global_position) - flat(corner)).normalized()
-	await walk(2, flat(corner) + inward * 0.75, 0.2)
+	await walk(2, flat(corner) + inward * 1.0, 0.2)
 	stick(2, Vector2(1, 0))
 	await frames(10)
 	stick(2, Vector2.ZERO)
@@ -334,8 +347,9 @@ func run() -> void:
 	for pid in [1, 2]:
 		corner = floor_corner(s) # (it drifts along the shore)
 		inward = (flat(s.global_position) - flat(corner)).normalized()
-		await walk(pid, flat(corner) + inward * 0.8, 0.3)
-		await jump_to(pid, flat(bean(pid).global_position) + Vector2(3.0, 0), 3.5)
+		# A run-up from the middle, jumping just before the side.
+		await walk(pid, flat(corner) + inward * 2.2, 0.3)
+		await jump_to(pid, flat(corner) - inward * 2.5, 3.4)
 		# Up the beach, clear of the boat (it drifts along the shore).
 		var away := signf(bean(pid).global_position.z - s.global_position.z)
 		await walk(pid, Vector2(bean(pid).global_position.x + 0.5, bean(pid).global_position.z + away * 2.5), 0.4)
