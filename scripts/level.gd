@@ -16,6 +16,7 @@ const ROOMS := [
 	preload("res://scripts/rooms/counterweight.gd"),
 	preload("res://scripts/rooms/elevator.gd"),
 	preload("res://scripts/rooms/zipline.gd"),
+	preload("res://scripts/rooms/paper_boat.gd"),
 ]
 const ADVANCE_DELAY := 3.0 ## seconds between solving a room and loading the next
 

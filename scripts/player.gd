@@ -59,6 +59,7 @@ var _phase := 0.0
 var _tilt := Vector2.ZERO
 var _tilt_vel := Vector2.ZERO
 var _yaw := 0.0
+var _wet := 0.0 ## how long you've been in deep water
 
 
 func _a(action: String) -> String:
@@ -295,6 +296,8 @@ func _physics_process(delta: float) -> void:
 	if riding:
 		_ride(delta, wish)
 		return
+	if _in_water(delta):
+		return
 
 	# Separate control: while held, movement slides the whole sheet, jump flips
 	# it over and grab turns it.
@@ -350,6 +353,26 @@ func _physics_process(delta: float) -> void:
 
 	if global_position.y < FALL_DEATH_Y:
 		respawn()
+
+
+## Beans can't swim: in over your knees, you flounder, the current takes
+## you, and you're soon back at your respawn point.
+func _in_water(delta: float) -> bool:
+	var w := Water.find(get_tree(), global_position)
+	if w == null or global_position.y > w.surface() - 0.4:
+		_wet = 0.0
+		return false
+	_wet += delta
+	if _wet > 0.8:
+		_wet = 0.0
+		respawn()
+		return true
+	release()
+	var flow := w.current - Vector3(velocity.x, 0.0, velocity.z)
+	velocity += Vector3(flow.x, 0.0, flow.z) * minf(4.0 * delta, 1.0)
+	velocity.y = maxf(velocity.y - GRAVITY * delta * 0.3, -1.5)
+	move_and_slide()
+	return true
 
 
 func nudge_lift(amount: float) -> void:

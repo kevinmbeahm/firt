@@ -241,6 +241,14 @@ func add_cable(from: Vector3, to: Vector3, post_bottoms := Vector2(-6.0, -6.0)) 
 	return c
 
 
+## Water (S5) over a rectangle: `center` is the middle of its surface.
+func add_water(center: Vector3, extent: Vector2, depth: float, current := Vector3.ZERO, falls := false) -> Water:
+	var w := Water.new()
+	w.setup(center, extent, depth, current, falls)
+	add_child(w)
+	return w
+
+
 ## Extra line for the HUD (e.g. how well a shape gate is filled).
 func status() -> String:
 	return ""

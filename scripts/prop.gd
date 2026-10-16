@@ -108,7 +108,25 @@ func is_carried() -> bool:
 	return holder != null or Engine.get_physics_frames() - _ridden_at <= 2
 
 
-## Back to where it started (lost in the void, or a plate dumped it).
+## In water: apples and crates float (they're light for their size), the
+## weight block sinks; the current carries them.
+func _float(state: PhysicsDirectBodyState3D) -> void:
+	var w := Water.find(get_tree(), state.transform.origin)
+	if w == null:
+		return
+	var part := clampf((w.surface() - (state.transform.origin.y - size)) / (2.0 * size), 0.0, 1.0)
+	if part <= 0.0:
+		return
+	can_sleep = false
+	var vol := 4.0 / 3.0 * PI * size * size * size if kind == BALL else pow(2.0 * size, 3.0)
+	if kind == WEIGHT:
+		vol *= 0.15 # (it's iron)
+	state.apply_central_force(Vector3.UP * Water.DENSITY * vol * part * Water.GRAVITY)
+	state.apply_central_force(-(state.linear_velocity - w.current) * mass * 2.0 * part)
+	state.angular_velocity *= 1.0 - 0.05 * part
+
+
+## Back to where it started (lost in the void, a plate dumped it, over a waterfall).
 func respawn() -> void:
 	if holder != null:
 		holder.drop_prop()
@@ -135,6 +153,8 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 	if _nudge != Vector3.ZERO:
 		state.linear_velocity += _nudge
 		_nudge = Vector3.ZERO
+	if holder == null:
+		_float(state)
 	if holder != null:
 		# Follow the hands (still colliding with the world on the way).
 		var to: Vector3 = holder.hold_point() - state.transform.origin

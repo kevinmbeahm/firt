@@ -29,6 +29,12 @@ const HOOK_KG_PER_M := 50.0 ## what each metre of crease on the cable holds
 const RIDER_KG := 70.0
 const HOOK_DRAG := 0.08 ## rope friction and air: slows a sliding sheet (v squared)
 const HOOK_SWING_DAMP := 1.5
+const PAPER_FLOAT := 3.0 ## kg per square metre a sheet lying in water holds up on its own (a raft)
+const WATER_GRIP := 1.0 ## per second: how quickly a floating sheet takes up the current's speed
+const WATER_HEAVE_DAMP := 30.0 ## ...up and down
+const WATER_SPIN_DAMP := 20.0
+const PADDLE_SPEED := 0.5 ## share of the slide speed you paddle a floating sheet at
+const PADDLE_ACCEL := 2.0
 const CONTACT_SLOP := 0.02 ## overlaps shallower than this (a loaded sheet settling) don't block folds
 
 var paper_size := Vector2(18, 12)
@@ -59,6 +65,15 @@ var _swing := 0.0 ## how far it has swung about the cable from there, radians
 var _swing_v := 0.0
 var _swing_hang := 0.0 ## the swing at which its centre of mass is right below the cable
 var _swing_r := 1.0 ## how far its centre of mass is from the cable
+var water: Water = null ## the water it's floating in, if any
+var swamped := false ## water got in over the rim (or through a gap): its hull holds nothing up
+var dry_volume := 0.0 ## the dry space its hull keeps under the waterline, m^3
+var _hull: Hull = null
+var _dry_center := Vector3.ZERO ## (sheet-local)
+var _dry_frame := 0
+var _out_of_water := 0.0
+var _sunk := 0.0
+var _wet := 0.0
 var _drag_side := 0 ## which side of its paper the flap being folded is on (+1 above, -1 below, 0 not far over yet)
 var _mesh_instance: MeshInstance3D
 var _crease: MeshInstance3D
@@ -473,7 +488,105 @@ func hook_status() -> String:
 	return hook_note
 
 
+## Back to where it started, with its folds (lost in the void, over a waterfall).
+func respawn() -> void:
+	if hook_cable != null:
+		unhook()
+	if not carriers.is_empty():
+		end_carry()
+	if fold_owner != null:
+		cancel_fold()
+	swamped = false
+	_respawn = true
+	sleeping = false
+
+
+# --- Water (S5) ----------------------------------------------------------------
+# Paper floats two ways: on the dry space a folded hull keeps under the
+# waterline (Hull: water pours in over a rim or through a gap, and then it's
+# swamped until it's out of the water again), and as a thin raft (a little lift
+# per square metre of paper lying in the water). The water drags it along with
+# its current and damps its bobbing. Sheet handling paddles it.
+
+func _update_water(delta: float) -> void:
+	if freeze:
+		water = null
+		return
+	var box := world_box()
+	var w := Water.find(get_tree(), global_position + box.get_center())
+	if w == null or global_position.y + box.position.y > w.surface() + 0.05:
+		water = null
+		dry_volume = 0.0
+		_out_of_water += delta
+		if _out_of_water > 1.0:
+			swamped = false
+		return
+	water = w
+	_out_of_water = 0.0
+	sleeping = false # (the water never stops pushing)
+	var surf := w.surface()
+	# Sunk without a trace: back to where it started.
+	if global_position.y + box.end.y < surf - 0.3:
+		_sunk += delta
+		if _sunk > 2.0:
+			_sunk = 0.0
+			respawn()
+			return
+	else:
+		_sunk = 0.0
+	var g := Water.GRAVITY
+	# A raft: each facet holds up a little where it lies in the water.
+	var wet_area := 0.0
+	for i in facets.size():
+		var f: PaperModel.Facet = facets[i]
+		var off: Vector3 = _offsets[i] if i < _offsets.size() else Vector3.ZERO
+		var area := absf(PaperGeometry.signed_area(f.pts))
+		var pts := Array(f.pts)
+		pts.append(PaperGeometry.centroid(f.pts))
+		var part := 0.0
+		var at := Vector3.ZERO
+		for q in pts:
+			var p := to_global(f.at(q) + off)
+			var k := clampf((surf - p.y) / 0.1 + 0.5, 0.0, 1.0)
+			part += k
+			at += p * k
+		if part <= 0.0:
+			continue
+		at /= part
+		part /= pts.size()
+		wet_area += area * part
+		apply_force(Vector3.UP * PAPER_FLOAT * area * part * g, at - global_position)
+	# A hull: the dry space it keeps out.
+	if _hull == null:
+		_hull = Hull.build(facets, _offsets)
+		_dry_frame = 0
+	if _dry_frame % 3 == 0:
+		var d := _hull.dry(global_transform, surf)
+		if dry_volume > 0.5 and d.volume < dry_volume * 0.3:
+			swamped = true # the water poured in
+		dry_volume = d.volume
+		_dry_center = to_local(d.center)
+	_dry_frame += 1
+	if not swamped and dry_volume > 0.0:
+		apply_force(Vector3.UP * Water.DENSITY * dry_volume * g, to_global(_dry_center) - global_position)
+	_wet = minf(wet_area / 4.0, 1.0) # (how firmly the water has hold of it, 0..1)
+	apply_central_force(-Vector3.UP * linear_velocity.y * WATER_HEAVE_DAMP * wet_area)
+	apply_torque(-angular_velocity * WATER_SPIN_DAMP * wet_area)
+
+
+## For the HUD.
+func water_status() -> String:
+	if water == null:
+		return ""
+	if swamped:
+		return "swamped: the water got in"
+	if dry_volume > 0.05:
+		return "afloat on %.1f m3 of dry hull" % dry_volume
+	return "afloat as a raft"
+
+
 func _ready() -> void:
+	add_to_group("sheets")
 	spawn_transform = global_transform
 
 
@@ -743,6 +856,7 @@ func _rotate_about_center(rot: Basis) -> void:
 
 
 func _physics_process(delta: float) -> void:
+	_update_water(delta)
 	if hook_cable != null:
 		_update_hook(delta)
 	elif carriers.size() == 2:
@@ -774,6 +888,22 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 		state.angular_velocity = Vector3.ZERO
 		return
 	var v := state.linear_velocity
+	if _push_velocity != null and water != null:
+		# Afloat: paddle it, relative to the current.
+		var want: Vector3 = water.current + _push_velocity * PADDLE_SPEED
+		var h := Vector3(v.x, 0.0, v.z).move_toward(Vector3(want.x, 0.0, want.z), PADDLE_ACCEL * state.step)
+		state.linear_velocity = Vector3(h.x, v.y, h.z)
+		var w0 := state.angular_velocity
+		state.angular_velocity = w0 - Vector3.UP * w0.dot(Vector3.UP)
+		_push_velocity = null
+		return
+	if water != null and _wet > 0.0:
+		# The current carries it. (Set directly, like paddling: beans standing
+		# in it would otherwise hold it still by the friction under their feet.)
+		var h := Vector3(v.x, 0.0, v.z)
+		h += (Vector3(water.current.x, 0.0, water.current.z) - h) * minf(WATER_GRIP * _wet * state.step, 1.0)
+		state.linear_velocity = Vector3(h.x, v.y, h.z)
+		return
 	if _push_velocity != null and state.get_contact_count() == 0:
 		_push_velocity = null # can't steer a sheet that's in free fall
 	if _push_velocity != null:
@@ -855,6 +985,7 @@ func _refresh() -> void:
 	_update_mass()
 	_crease.visible = false
 	sleeping = false
+	_hull = null
 
 
 ## Mass from paper area; centre of mass from where the paper actually is now,
