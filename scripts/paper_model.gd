@@ -240,16 +240,7 @@ static func plan_fold(src: Array, gi: int, g: Vector3, t: Vector3, up: Vector3, 
 			pieces.append({"f": f.clone(), "side": signf(cut_n.dot(c - a)), "src": i})
 
 	# Paper-space hinges between pieces: [neighbour, shared segment].
-	var adj: Array = []
-	adj.resize(pieces.size())
-	for i in pieces.size():
-		adj[i] = []
-	for i in pieces.size():
-		for j in range(i + 1, pieces.size()):
-			var seg := shared_edge(pieces[i].f.pts, pieces[j].f.pts)
-			if not seg.is_empty():
-				adj[i].append([j, seg])
-				adj[j].append([i, seg])
+	var adj := _adjacency(pieces)
 
 	# Grow the moving set from the grabbed piece through paper-space hinges.
 	var start := -1
@@ -280,16 +271,18 @@ static func plan_fold(src: Array, gi: int, g: Vector3, t: Vector3, up: Vector3, 
 		res.reason = "the crease misses the paper"
 		return res
 
-	# Every hinge between moving and resting paper must lie on the crease.
-	for i in moving:
-		var mf: Facet = pieces[i].f
-		for link in adj[i]:
-			if moving.has(link[0]):
-				continue
-			for p in link[1]:
-				if _line_dist(mf.at(p), a, axis) > TEAR_TOL:
-					res.reason = "would tear the paper"
-					return res
+	# Every hinge between moving and resting paper must lie on the crease,
+	# except where the flap meets paper standing up at a corner: lifting the
+	# end of a tray up between its standing sides tucks each corner into a
+	# gusset (an ear folded on the corner's diagonal), as with a real box.
+	var gussets := {} # piece index -> where it goes (paper -> sheet-local)
+	var tears := _tears(pieces, adj, moving, a, axis)
+	if not tears.is_empty():
+		if mode != FOLD_NORMAL or not _gusset(pieces, tears, moving, a, axis, theta, gussets):
+			res.reason = "would tear the paper"
+			return res
+		adj = _adjacency(pieces)
+		res.swept = false # (gussets don't just swing about the crease: check where it ends up)
 
 	if mode != FOLD_NORMAL:
 		return _finish_reverse(res, pieces, adj, moving, a, axis, vg, canonical(n), mode == FOLD_INSIDE_REVERSE)
@@ -329,7 +322,12 @@ static func plan_fold(src: Array, gi: int, g: Vector3, t: Vector3, up: Vector3, 
 	var placed := {} # piece index -> facet in `out`
 	for i in pieces.size():
 		var f: Facet = pieces[i].f
-		if moving.has(i):
+		if gussets.has(i):
+			var gf2 := Facet.new(f.pts, (gussets[i] as Transform3D).orthonormalized(), f.layer, f.creases.duplicate())
+			out.append(gf2)
+			moved.append(gf2)
+			placed[i] = gf2
+		elif moving.has(i):
 			var rank := (mtop - f.layer) if reversed else (f.layer - mbottom)
 			var l := (top + 1 + rank) if lands_above else (bottom - 1 - (mtop - mbottom) + rank)
 			var nf := Facet.new(f.pts, (spin * f.xf).orthonormalized(), l, f.creases.duplicate())
@@ -341,12 +339,12 @@ static func plan_fold(src: Array, gi: int, g: Vector3, t: Vector3, up: Vector3, 
 			placed[i] = f
 	# Paper can't end up passing through other paper (hinged neighbours touch
 	# along their shared edge, which is fine).
-	for i in moving:
+	for i in moving.keys() + gussets.keys():
 		var hinged := {}
 		for link in adj[i]:
 			hinged[link[0]] = true
 		for j in pieces.size():
-			if moving.has(j) or hinged.has(j):
+			if moving.has(j) or gussets.has(j) or hinged.has(j):
 				continue
 			var m: Facet = placed[i]
 			var st: Facet = placed[j]
@@ -394,6 +392,141 @@ static func plan_fold(src: Array, gi: int, g: Vector3, t: Vector3, up: Vector3, 
 	res.theta = theta
 	res.above = lands_above
 	return res
+
+
+static func _adjacency(pieces: Array) -> Array:
+	var adj: Array = []
+	adj.resize(pieces.size())
+	for i in pieces.size():
+		adj[i] = []
+	for i in pieces.size():
+		for j in range(i + 1, pieces.size()):
+			var seg := shared_edge(pieces[i].f.pts, pieces[j].f.pts)
+			if not seg.is_empty():
+				adj[i].append([j, seg])
+				adj[j].append([i, seg])
+	return adj
+
+
+## Hinges between moving and resting paper that don't lie on the crease:
+## [[moving piece, resting piece, shared segment], ...].
+static func _tears(pieces: Array, adj: Array, moving: Dictionary, a: Vector3, axis: Vector3) -> Array:
+	var out := []
+	for i in moving:
+		var mf: Facet = pieces[i].f
+		for link in adj[i]:
+			if moving.has(link[0]):
+				continue
+			for p in link[1]:
+				if _line_dist(mf.at(p), a, axis) > TEAR_TOL:
+					out.append([i, link[0], link[1]])
+					break
+	return out
+
+
+## Tries to turn each tear into a gusset: the moving flap (an end of a tray)
+## is hinged to resting paper standing at an angle (a side), along an edge
+## running out from the crease. The crease line carries on into the side
+## (paper space is one flat sheet), and the corner of the side between that
+## line and the hinge folds on its diagonal: one triangle stays hinged to the
+## side, the other to the flap, and they fold together like the ear of a box
+## corner, outside the box. Splits the side into pieces (appended to
+## `pieces`) and fills `out` with where each triangle goes. False if any tear
+## isn't a corner like that.
+static func _gusset(pieces: Array, tears: Array, moving: Dictionary, a: Vector3, axis: Vector3, theta: float, out: Dictionary) -> bool:
+	var seen := {}
+	for t in tears:
+		if seen.has(t[1]):
+			return false # (one corner per resting piece)
+		seen[t[1]] = true
+	var rot := Basis(axis, theta)
+	for t in tears:
+		var mf: Facet = pieces[t[0]].f
+		var j: int = t[1]
+		var sf: Facet = pieces[j].f
+		var seg: PackedVector2Array = t[2]
+		if _coplanar(mf, sf) or absf(mf.normal().dot(sf.normal())) > 0.98:
+			return false
+		var on0 := _line_dist(sf.at(seg[0]), a, axis) < TEAR_TOL
+		var on1 := _line_dist(sf.at(seg[1]), a, axis) < TEAR_TOL
+		if on0 == on1:
+			return false
+		var vp: Vector2 = seg[0] if on0 else seg[1]
+		var e2: Vector2 = ((seg[1] if on0 else seg[0]) - vp).normalized()
+		# The crease's direction in paper space, pointing into the side.
+		var e4 := Vector2(mf.xf.basis.x.dot(axis), mf.xf.basis.y.dot(axis)).normalized()
+		if not Geometry2D.is_point_in_polygon(vp + e4 * 0.05 + e2 * 0.01, sf.pts):
+			e4 = -e4
+			if not Geometry2D.is_point_in_polygon(vp + e4 * 0.05 + e2 * 0.01, sf.pts):
+				return false
+		if e4.dot(e2) < -0.9:
+			return false
+		var c5 := (e4 + e2).normalized()
+		var n4 := Vector2(-e4.y, e4.x)
+		var n5 := Vector2(-c5.y, c5.x)
+		var s2 := n4.dot(e2) > 0.0
+		var main := PaperGeometry.clip_half_plane(sf.pts, vp, n4, not s2, SLIVER_AREA)
+		var corner := PaperGeometry.clip_half_plane(sf.pts, vp, n4, s2, SLIVER_AREA)
+		var s5 := n5.dot(e2) > 0.0
+		var t2 := PaperGeometry.clip_half_plane(corner, vp, n5, s5, SLIVER_AREA)
+		var t1 := PaperGeometry.clip_half_plane(corner, vp, n5, not s5, SLIVER_AREA)
+		if t1.size() < 3 or t2.size() < 3:
+			return false
+		# Where the triangles go: the diagonal ends up at its angles to the
+		# side's crease (fixed) and to the flap's hinge (turned with the flap).
+		var v3 := sf.at(vp)
+		var sb := sf.xf.basis
+		var w4 := (sb * Vector3(e4.x, e4.y, 0.0)).normalized()
+		var w2 := (sb * Vector3(e2.x, e2.y, 0.0)).normalized()
+		var w5 := (sb * Vector3(c5.x, c5.y, 0.0)).normalized()
+		var b := (rot * w2).normalized()
+		var n_in := sf.normal()
+		if n_in.dot(mf.at(PaperGeometry.centroid(mf.pts)) - v3) < 0.0:
+			n_in = -n_in
+		var alpha1 := e4.angle_to(c5)
+		var alpha2 := c5.angle_to(e2)
+		var v: Vector3
+		var cr := w4.cross(b)
+		var c := w4.dot(b)
+		if cr.length() < 1e-3:
+			v = (w4 * cos(absf(alpha1)) - n_in * sin(absf(alpha1))).normalized()
+		else:
+			var k1 := cos(alpha1)
+			var k2 := cos(alpha2)
+			var x := (k1 - c * k2) / (1.0 - c * c)
+			var y := (k2 - c * k1) / (1.0 - c * c)
+			var p := w4 * x + b * y
+			var z := sqrt(maxf((1.0 - p.length_squared()) / cr.length_squared(), 0.0))
+			v = p + cr * z
+			if v.dot(n_in) > 1e-4:
+				v = p - cr * z
+			v = v.normalized()
+		var p0 := w5 - w4 * w5.dot(w4)
+		var p1 := v - w4 * v.dot(w4)
+		var phi := p0.signed_angle_to(p1, w4) if p0.length() > 1e-4 and p1.length() > 1e-4 else 0.0
+		var r1 := Basis(w4, phi)
+		var q := _frame(b, v) * _frame(w2, w5).inverse()
+		var entries := []
+		if main.size() >= 3:
+			entries.append([main, null])
+		entries.append([t1, Transform3D(r1, v3 - r1 * v3) * sf.xf])
+		entries.append([t2, Transform3D(q, v3 - q * v3) * sf.xf])
+		for k in entries.size():
+			var e = {"f": Facet.new(entries[k][0], sf.xf, sf.layer, sf.creases.duplicate()), "side": pieces[j].side, "src": pieces[j].src}
+			var idx := j if k == 0 else pieces.size()
+			if k == 0:
+				pieces[j] = e
+			else:
+				pieces.append(e)
+			if entries[k][1] != null:
+				out[idx] = entries[k][1]
+	return true
+
+
+static func _frame(u: Vector3, w: Vector3) -> Basis:
+	var x := u.normalized()
+	var y := (w - x * x.dot(w)).normalized()
+	return Basis(x, y, x.cross(y))
 
 
 ## Paper caught inside a folding flap has to fold with it: a stationary layer
