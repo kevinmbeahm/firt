@@ -8,7 +8,7 @@ extends SceneTree
 # Run:   godot --headless --fixed-fps 120 -s tests/solve_ferry.gd   (exit code 0 = pass)
 # Shots: godot --fixed-fps 120 -s tests/solve_ferry.gd -- --shots=/some/dir   (needs a display)
 
-const ROOM := 9
+const ROOM := 8
 
 var lvl
 var ok := true

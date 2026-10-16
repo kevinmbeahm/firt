@@ -6,7 +6,7 @@ extends SceneTree
 # back where they started.
 # Run:   godot --headless --fixed-fps 120 -s tests/water_physics.gd   (exit code 0 = pass)
 
-const ROOM := 8
+const ROOM := 7
 const T := PaperModel.THICKNESS * 0.5
 
 var lvl

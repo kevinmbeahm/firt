@@ -86,6 +86,13 @@ recognising a named model.
 
 ### 4.1 Boats and baskets: volume below a rim
 
+*As built:* rather than slicing for closed loops, the game floods a voxel grid
+of the folded paper (cells 0.25 m, in the sheet's frame) from outside, below
+the waterline; the open cells the water can't reach are the dry volume, and
+buoyancy acts at their centre. That covers leaks, rims dipping under and
+tipping in one test. Flat paper adds a little raft lift. There's no water
+collecting inside a flooded hull.
+
 To decide whether a folded sheet **holds water** (a boat floats, a basket
 carries pebbles):
 
@@ -202,7 +209,7 @@ a difficulty rating from 1 to 5.
   pylon).
 - **Systems:** S1, S7. **Difficulty:** 2.
 
-- **As built (room 8):** as designed, with these choices. A crease hooks on
+- **As built (room 10):** as designed, with these choices. A crease hooks on
   only when it's carried up to the cable (two beans, one at each end of the
   crease) and lies along it; it then swings to hang below, and the carriers
   are left hanging on, held by the ends of the crease. A flat fold works as
@@ -299,6 +306,13 @@ a difficulty rating from 1 to 5.
   sheet washes over the falls and respawns, with its folds, on the start dock.
 - **Systems:** S1, S3, S4, S5. **Difficulty:** 3.
 
+- **As built (room 8):** the hull is a **tray** (the printed lines mark its
+  four sides; folding the ends up tucks the corners into gussets), not the
+  traditional paper boat (its last step, pulling it open, isn't a rigid
+  fold). Getting it in the water is a slipway; the far side is a beach to run
+  aground on. Paddling is sheet handling while standing in it. No balance
+  puzzle: a light paper tray is very stable. The raft "aha" is in: a flat
+  sheet holds both beans but sinks with the crate.
 ---
 
 ### P6. "Basket Run"
@@ -350,6 +364,13 @@ a difficulty rating from 1 to 5.
 - **Teaches:** combining two built objects, building on a moving base.
 - **Systems:** S5 (plus a "grab a post" anchor; reuse grab). **Difficulty:** 4.
 
+- **As built (room 9): a portage instead.** Building a step on a moving boat
+  and anchoring to posts need mechanics that don't exist yet. Instead: two
+  channels flowing opposite ways, an island between with shallow shelves
+  (beans can wade 0.6 m) and a fence with a gap a bean fits through but a
+  boat doesn't. Boat the crate across, carry the loaded boat over the fence
+  together (one bean at each end, in line through the gap), and boat it
+  across the second channel.
 ---
 
 ### P8. "Paper Plane Post"
@@ -576,7 +597,11 @@ with an earlier mechanic, then a "free" room with several valid solutions.
 | S7 cables and hook bars; hanging on | built |
 | S8 lift (plate-driven) | built (for P13) |
 | S2 fit-box mode | built |
-| P2 Zipline Delivery (room 8) | built |
+| P2 Zipline Delivery (room 10) | built |
 | P4 Tight Squeeze (room 4) | built (unfold-and-cover ending) |
 | P13 Paper Elevator (room 7) | built (hang-on version, two plates) |
+| Gusset corners (a tray from single folds) | built |
+| S5 water: hull buoyancy (voxel flood), rafts, currents, waterfalls, paddling, wading | built |
+| P5 Paper Boat (room 8) | built (tray hull) |
+| P7 Ferry Across the Flood (room 9) | built (portage version) |
 | Everything else | not started |
