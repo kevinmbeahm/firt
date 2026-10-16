@@ -19,6 +19,8 @@ const FALL_DEATH_Y := -14.0
 const ARM_LEN := 0.75
 const MAX_ARM_STRETCH := 2.6
 const PROP_LIFT := Vector2(-1.0, 1.6) ## how far a carried prop can be lowered/raised
+const HANG := 2.1 ## hanging on, your hands are this far above your feet
+const HOP_SPEED := 4.0 ## letting go of a ride while pushing the stick hops you off that way
 
 var id := 1
 var color := Color.WHITE
@@ -27,6 +29,7 @@ var spawn := Vector3.ZERO
 
 var grabbing := false ## holding a sheet: folding it, or carrying it with the other bean
 var carrying := false ## ...carrying it (see PaperSheet.start_carry)
+var riding := false ## ...hanging on to it while it hangs on a cable (see PaperSheet.add_rider)
 var held_prop: Prop = null ## a prop carried in front of you
 var controlled_by := 1 ## which player's controls drive this character: 1, 2, or 0 = idle (solo play)
 var _latched := false ## holding on for a player who just took over, until they press grab
@@ -251,6 +254,8 @@ func respawn() -> void:
 func release() -> void:
 	_latched = false
 	drop_prop()
+	if riding:
+		end_ride()
 	if carrying and is_instance_valid(_grab_sheet):
 		_grab_sheet.end_carry()
 	if grabbing:
@@ -287,6 +292,9 @@ func _physics_process(delta: float) -> void:
 			_body_shape.disabled = false
 	var input := _stick()
 	var wish: Vector3 = level.camera_basis() * Vector3(input.x, 0.0, input.y)
+	if riding:
+		_ride(delta, wish)
+		return
 
 	# Separate control: while held, movement slides the whole sheet, jump flips
 	# it over and grab turns it.
@@ -383,6 +391,8 @@ func _step_up(motion: Vector3) -> void:
 ## Where the hands hold the grabbed point now, in world space. It follows the
 ## player's walking (not the sheet's own motion) and the raised/lowered hands.
 func _hands_world() -> Vector3:
+	if riding:
+		return _grab_sheet.to_global(_grab_local)
 	if carrying:
 		return carry_hands()
 	var s := _grab_sheet
@@ -439,11 +449,63 @@ func _update_grab(handling_sheet: bool) -> void:
 			_lift = 0.0
 			_fold_mode = PaperModel.FOLD_NORMAL
 			_choice = 0
+		elif s.is_hooked():
+			s.add_rider(self, hover.local) # hang on
 		elif s.can_join_carry(self):
 			# Someone's already holding it: pick it up together.
 			_grab_sheet = s
 			_grab_local = hover.local
 			s.start_carry(self, hover.local)
+
+
+## Called by the sheet when you take hold of it hanging on a cable (or were
+## carrying it when it hooked on): you hang from where you hold it.
+func begin_ride(s: PaperSheet, local: Vector3) -> void:
+	carrying = false
+	grabbing = true
+	riding = true
+	_grab_sheet = s
+	_grab_local = local
+	_lift = 0.0
+	add_collision_exception_with(s)
+
+
+## Lets go of a ride (or the sheet slipped off its cable).
+func end_ride() -> void:
+	if not riding:
+		return
+	riding = false
+	grabbing = false
+	_latched = false
+	if is_instance_valid(_grab_sheet):
+		_grab_sheet.remove_rider(self)
+		remove_collision_exception_with(_grab_sheet)
+
+
+## Hanging on: your hands go where the paper takes them and you dangle below
+## (or drag along the ground). Let go to drop; push the stick as you let go
+## to hop off that way.
+func _ride(delta: float, wish: Vector3) -> void:
+	if not is_instance_valid(_grab_sheet) or not _grab_sheet.riders.has(self):
+		end_ride()
+		return
+	if _latched and Input.is_action_pressed(_a("grab")):
+		_latched = false
+	if not _pressed("grab"):
+		end_ride()
+		if wish.length() > 0.1:
+			velocity += wish.normalized() * HOP_SPEED + Vector3.UP * HOP_SPEED * 0.6
+		return
+	var target := _hands_world() - Vector3.UP * HANG
+	var to := target - global_position
+	if to.length() > 1.6:
+		end_ride() # something held you back: your grip slips
+		return
+	velocity = (to / delta).limit_length(14.0)
+	move_and_slide()
+	velocity = velocity.limit_length(8.0) # (what you keep when you let go)
+	_floor_body = null
+	hover = null
 
 
 ## Called by the sheet when a carry starts: hold it where it is now.
@@ -486,6 +548,8 @@ func drop_prop() -> void:
 func fold_status() -> String:
 	if held_prop != null:
 		return "carrying a %d kg %s" % [roundi(held_prop.mass), ["ball", "crate", "weight block"][held_prop.kind]]
+	if riding:
+		return "hanging on (let go to drop; push the stick as you let go to hop off)"
 	if carrying:
 		return "carrying the sheet together (raise/lower your end with jump/lower; keep it level)"
 	if not grabbing:

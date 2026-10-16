@@ -225,6 +225,22 @@ func open_door(door: AnimatableBody3D) -> void:
 	tw.tween_property(door, "position:y", door.position.y - (door.get_child(1).shape as BoxShape3D).size.y - 0.05, 1.2)
 
 
+## A cable from `from` to `to` (S7), with a post holding up each end.
+func add_cable(from: Vector3, to: Vector3, post_bottoms := Vector2(-6.0, -6.0)) -> Cable:
+	var c := Cable.new()
+	c.setup(from, to)
+	add_child(c)
+	var post := Color(0.45, 0.35, 0.25)
+	var out := (to - from)
+	out.y = 0.0
+	out = out.normalized() * 0.35
+	for end in [[from - out, post_bottoms.x], [to + out, post_bottoms.y]]:
+		var top: Vector3 = end[0]
+		var h: float = top.y + 0.2 - end[1]
+		add_block(Vector3(top.x, end[1] + h * 0.5, top.z), Vector3(0.35, h, 0.35), post)
+	return c
+
+
 ## Extra line for the HUD (e.g. how well a shape gate is filled).
 func status() -> String:
 	return ""

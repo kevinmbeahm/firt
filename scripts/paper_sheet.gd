@@ -22,6 +22,13 @@ const CARRY_MAX_SPEED := 4.0 ## m/s: how fast a carried sheet follows the hands
 const CARRY_MAX_RISE := 1.0 ## m/s: ...rises or drops
 const CARRY_MAX_TURN := 1.2 ## rad/s: ...and turns
 const CARRY_STRETCH := 1.5 ## carriers' hands this much further apart (or closer) than their grips and it slips
+const HOOK_TOL := 0.35 ## a crease this close to a cable along HOOK_MIN of its length hooks onto it
+const HOOK_MIN := 1.0
+const HOOK_ANGLE := deg_to_rad(15.0) ## ...and running this close to parallel with it
+const HOOK_KG_PER_M := 50.0 ## what each metre of crease on the cable holds
+const RIDER_KG := 70.0
+const HOOK_DRAG := 0.08 ## rope friction and air: slows a sliding sheet (v squared)
+const HOOK_SWING_DAMP := 1.5
 const CONTACT_SLOP := 0.02 ## overlaps shallower than this (a loaded sheet settling) don't block folds
 
 var paper_size := Vector2(18, 12)
@@ -38,6 +45,19 @@ var carriers: Array = [] ## the two beans carrying it, if it's being carried
 var _rider_vel := {} ## (carrying) prop -> the paper's velocity under it last frame
 var _carry_local: Array = [] ## where each carrier holds it (sheet-local)
 var _carry_basis := Basis.IDENTITY ## its orientation when they picked it up
+var hook_cable: Cable = null ## the cable it hangs on, if any
+var hook_len := 0.0 ## metres of crease on the cable
+var hook_speed := 0.0 ## sliding along the cable, m/s (+ toward its end)
+var hook_note := "" ## why it last came off a cable, for the HUD
+var riders: Array = [] ## beans hanging on to it
+var _hook_s := 0.0 ## where its crease's middle is along the cable, metres
+var _hook_mid := Vector3.ZERO ## the hooked crease's middle, sheet-local
+var _hook_half := 0.0 ## half the hooked crease's length
+var _hook_basis := Basis.IDENTITY ## its orientation with the crease along the cable, before swinging
+var _swing := 0.0 ## how far it has swung about the cable from there, radians
+var _swing_v := 0.0
+var _swing_hang := 0.0 ## the swing at which its centre of mass is right below the cable
+var _swing_r := 1.0 ## how far its centre of mass is from the cable
 var _drag_side := 0 ## which side of its paper the flap being folded is on (+1 above, -1 below, 0 not far over yet)
 var _mesh_instance: MeshInstance3D
 var _crease: MeshInstance3D
@@ -108,6 +128,8 @@ func setup(size: Vector2, printed: Array = []) -> void:
 
 
 func reset_paper() -> void:
+	if hook_cable != null:
+		unhook()
 	if not carriers.is_empty():
 		end_carry()
 	facets = PaperModel.make_sheet(paper_size, printed_creases)
@@ -119,7 +141,7 @@ func reset_paper() -> void:
 
 
 func is_busy() -> bool:
-	return fold_owner != null or not carriers.is_empty() or _tween_t < 1.0
+	return fold_owner != null or not carriers.is_empty() or hook_cable != null or _tween_t < 1.0
 
 
 # --- Carrying ------------------------------------------------------------------
@@ -247,6 +269,203 @@ func _carry_riders(from: Transform3D, to: Transform3D) -> void:
 		prop.nudge(dv.limit_length(1.0))
 		seen[prop] = v
 	_rider_vel = seen
+
+
+# --- Hanging on a cable (S7) -------------------------------------------------
+# Carry a sheet up to a cable with a crease lying along it and it hooks on: it
+# swings to hang below the cable and the carriers find themselves hanging on to
+# it. Once someone hangs on it slides downhill; on its own, friction holds it.
+# Each metre of crease on the cable holds HOOK_KG_PER_M: overload a short hook
+# and it slips off.
+
+func is_hooked() -> bool:
+	return hook_cable != null
+
+
+## The creases (edges where two facets meet at an angle), sheet-local:
+## [[a, b], ...].
+func crease_segments() -> Array:
+	var out := []
+	for i in facets.size():
+		var fi: PaperModel.Facet = facets[i]
+		for j in range(i + 1, facets.size()):
+			var fj: PaperModel.Facet = facets[j]
+			if fi.normal().dot(fj.normal()) > 0.999:
+				continue
+			var e := PaperModel.shared_edge(fi.pts, fj.pts)
+			if e.size() < 2 or e[0].distance_to(e[1]) < 0.01:
+				continue
+			var off: Vector3 = (_offsets[i] + _offsets[j]) * 0.5
+			out.append([fi.at(e[0]) + off, fi.at(e[1]) + off])
+	return out
+
+
+## A crease lying along a cable now: {cable, a, b, len}, or {}.
+func _find_hook() -> Dictionary:
+	var cables := get_tree().get_nodes_in_group("cables")
+	if cables.is_empty():
+		return {}
+	for seg in crease_segments():
+		var p0 := to_global(seg[0])
+		var p1 := to_global(seg[1])
+		var d := p1 - p0
+		var n := int(ceil(d.length() / 0.1))
+		if d.length() < HOOK_MIN:
+			continue
+		for c in cables:
+			var cable: Cable = c
+			if absf(d.normalized().dot(cable.dir())) < cos(HOOK_ANGLE):
+				continue
+			var run := 0.0
+			var best := 0.0
+			for k in n + 1:
+				if cable.distance_to(p0 + d * (float(k) / n)) < HOOK_TOL:
+					run += d.length() / n
+					best = maxf(best, run)
+				else:
+					run = 0.0
+			if best >= HOOK_MIN:
+				return {"cable": cable, "a": seg[0], "b": seg[1],
+					"len": minf(d.length(), cable.length())}
+	return {}
+
+
+func _hook(h: Dictionary) -> void:
+	var c: Cable = h.cable
+	var a: Vector3 = h.a
+	var b: Vector3 = h.b
+	if (global_basis * (b - a)).dot(c.dir()) < 0.0:
+		var t := a
+		a = b
+		b = t
+	var held: Array = []
+	for i in carriers.size():
+		held.append([carriers[i], _carry_local[i]])
+	carriers = []
+	_carry_local = []
+	for pair in held:
+		pair[0].end_carry()
+	hook_cable = c
+	hook_len = h.len
+	hook_speed = 0.0
+	hook_note = ""
+	_hook_mid = (a + b) * 0.5
+	_hook_half = minf((b - a).length(), c.length()) * 0.5
+	var along := (global_basis * (b - a)).normalized()
+	_hook_basis = Basis(Quaternion(along, c.dir())) * global_basis
+	_hook_s = _clamp_on_cable(c.along(to_global(_hook_mid)))
+	_swing = 0.0
+	_swing_v = 0.0
+	# Where it comes to rest: its centre of mass right below the cable.
+	var cd := c.dir()
+	var arm := _hook_basis * (center_of_mass - _hook_mid)
+	arm -= cd * arm.dot(cd)
+	var down := Vector3.DOWN - cd * Vector3.DOWN.dot(cd)
+	_swing_r = maxf(arm.length(), 0.3)
+	_swing_hang = 0.0 if arm.length() < 0.05 else arm.signed_angle_to(down, cd)
+	freeze_mode = RigidBody3D.FREEZE_MODE_KINEMATIC
+	freeze = true
+	_held_still = true # let go of on unhook
+	for pair in held:
+		add_rider(pair[0], pair[1])
+
+
+## Slips off the cable (overloaded, or the room restarts): riders let go and it
+## falls.
+func unhook(note := "") -> void:
+	hook_note = note
+	var was := riders.duplicate()
+	riders.clear()
+	hook_cable = null
+	for p in was:
+		p.end_ride()
+	_let_go()
+
+
+## Bean `p` grabs the hooked sheet at sheet-local `local` and hangs on.
+func add_rider(p, local: Vector3) -> bool:
+	if hook_cable == null or riders.has(p):
+		return false
+	riders.append(p)
+	p.begin_ride(self, local)
+	return true
+
+
+func remove_rider(p) -> void:
+	riders.erase(p)
+
+
+## The load it's carrying and what its hook holds, kg.
+func hook_load() -> float:
+	return mass + riders.size() * RIDER_KG
+
+
+func hook_capacity() -> float:
+	return hook_len * HOOK_KG_PER_M
+
+
+## Keeps the whole hooked crease on the cable.
+func _clamp_on_cable(s: float) -> float:
+	var lo := _hook_half + 0.3
+	var hi := hook_cable.length() - _hook_half - 0.3
+	if lo > hi:
+		return hook_cable.length() * 0.5
+	return clampf(s, lo, hi)
+
+
+func _hook_pose(s: float, swing: float) -> Transform3D:
+	var basis := Basis(hook_cable.dir(), swing) * _hook_basis
+	var on := hook_cable.point(s) + Vector3.UP * (Cable.RADIUS + PaperModel.THICKNESS)
+	return Transform3D(basis, on - basis * _hook_mid)
+
+
+func _update_hook(delta: float) -> void:
+	if not is_instance_valid(hook_cable):
+		unhook()
+		return
+	if hook_load() > hook_capacity():
+		unhook("it slipped off the cable: %.1f m of crease holds %d kg, not %d" % [hook_len, roundi(hook_capacity()), roundi(hook_load())])
+		return
+	var cd := hook_cable.dir()
+	if riders.is_empty():
+		hook_speed = move_toward(hook_speed, 0.0, 3.0 * delta) # friction holds the paper alone
+	else:
+		hook_speed += (-cd.y * 9.8 - HOOK_DRAG * hook_speed * absf(hook_speed)) * delta
+	var want := _hook_s + hook_speed * delta
+	var s := _clamp_on_cable(want)
+	if absf(s - want) > 1e-5:
+		hook_speed = 0.0 # at the end of the cable
+	_swing_v += (-9.8 / _swing_r * sin(_swing - _swing_hang) - HOOK_SWING_DAMP * _swing_v) * delta
+	var swing := _swing + _swing_v * delta
+	var plan := {"moved": facets, "swept": false}
+	var pose := _hook_pose(s, swing)
+	if not _hits_world(plan, 1.0, pose):
+		_move_hooked(pose, s, swing)
+		return
+	# Something's in the way of the swing (the ground under a low cable): it
+	# drags, swinging back up as far as it has to.
+	_swing_v = 0.0
+	var back := _swing
+	for i in 12:
+		pose = _hook_pose(s, back)
+		if not _hits_world(plan, 1.0, pose):
+			_move_hooked(pose, s, back)
+			return
+		back = move_toward(back, 0.0, 0.08)
+	hook_speed = 0.0 # stuck
+
+
+func _move_hooked(pose: Transform3D, s: float, swing: float) -> void:
+	_hook_s = s
+	_swing = swing
+	global_transform = pose
+
+
+## For the HUD.
+func hook_status() -> String:
+	if hook_cable != null:
+		return "On the cable: %.1f m of crease holds %d kg (%d kg on it)" % [hook_len, roundi(hook_capacity()), roundi(hook_load())]
+	return hook_note
 
 
 func _ready() -> void:
@@ -519,8 +738,14 @@ func _rotate_about_center(rot: Basis) -> void:
 
 
 func _physics_process(delta: float) -> void:
-	if carriers.size() == 2:
+	if hook_cable != null:
+		_update_hook(delta)
+	elif carriers.size() == 2:
 		_update_carry()
+		if carriers.size() == 2:
+			var h := _find_hook()
+			if not h.is_empty():
+				_hook(h)
 	elif _tween_t < 1.0:
 		_tween_t = minf(_tween_t + delta / TWEEN_TIME, 1.0)
 		var s := smoothstep(0.0, 1.0, _tween_t)
