@@ -498,7 +498,9 @@ func _ride(delta: float, wish: Vector3) -> void:
 		return
 	var target := _hands_world() - Vector3.UP * HANG
 	var to := target - global_position
-	if to.length() > 1.6:
+	var held_back := to
+	held_back.y = maxf(held_back.y, 0.0) # (standing under it, your feet are on the ground)
+	if held_back.length() > 1.6:
 		end_ride() # something held you back: your grip slips
 		return
 	velocity = (to / delta).limit_length(14.0)

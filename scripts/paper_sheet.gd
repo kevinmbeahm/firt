@@ -52,6 +52,7 @@ var hook_note := "" ## why it last came off a cable, for the HUD
 var riders: Array = [] ## beans hanging on to it
 var _hook_s := 0.0 ## where its crease's middle is along the cable, metres
 var _hook_mid := Vector3.ZERO ## the hooked crease's middle, sheet-local
+var _hook_ends: Array = [] ## ...and its two ends: the handles you hang on by
 var _hook_half := 0.0 ## half the hooked crease's length
 var _hook_basis := Basis.IDENTITY ## its orientation with the crease along the cable, before swinging
 var _swing := 0.0 ## how far it has swung about the cable from there, radians
@@ -324,9 +325,12 @@ func _find_hook() -> Dictionary:
 					best = maxf(best, run)
 				else:
 					run = 0.0
-			if best >= HOOK_MIN:
-				return {"cable": cable, "a": seg[0], "b": seg[1],
-					"len": minf(d.length(), cable.length())}
+			# It hooks once it lies along as much of the cable as it can (the
+			# whole crease, or the whole of a short bar), give or take a bit.
+			var full := minf(d.length(), cable.length())
+			var overlap := absf(cable.along(p1) - cable.along(p0))
+			if best >= HOOK_MIN and overlap >= full - 0.5:
+				return {"cable": cable, "a": seg[0], "b": seg[1], "len": full}
 	return {}
 
 
@@ -350,6 +354,7 @@ func _hook(h: Dictionary) -> void:
 	hook_speed = 0.0
 	hook_note = ""
 	_hook_mid = (a + b) * 0.5
+	_hook_ends = [a, b]
 	_hook_half = minf((b - a).length(), c.length()) * 0.5
 	var along := (global_basis * (b - a)).normalized()
 	_hook_basis = Basis(Quaternion(along, c.dir())) * global_basis
@@ -816,6 +821,15 @@ func _all_points() -> Array:
 func nearest_handle(from_world: Vector3, radius: float):
 	var best = null
 	var best_d := radius
+	if hook_cable != null:
+		# Hanging on a cable, it's held by the ends of the hooked crease.
+		for end in _hook_ends:
+			var w := to_global(end)
+			var d := w.distance_to(from_world)
+			if d < best_d:
+				best_d = d
+				best = {"world": w, "local": end, "facet": 0, "dist": d}
+		return best
 	var up := up_local()
 	if _handles_up.dot(up) < 0.999:
 		_handles = PaperModel.handles(facets, _offsets, up)
