@@ -28,7 +28,7 @@ func frames(n: int) -> void:
 
 func run() -> void:
 	await frames(30)
-	lvl.load_room(3)
+	lvl.load_room(4)
 	await frames(40)
 	var y: float = lvl.room.UPPER_Y
 	var s: PaperSheet = lvl.sheet

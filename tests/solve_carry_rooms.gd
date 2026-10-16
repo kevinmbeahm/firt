@@ -235,7 +235,7 @@ func run() -> void:
 
 
 func basket_run() -> void:
-	lvl.load_room(3)
+	lvl.load_room(4)
 	await frames(40)
 	var room = lvl.room
 	check(room.title == "Basket Run", "the Basket Run room loads")
@@ -322,7 +322,7 @@ func basket_run() -> void:
 
 
 func counterweight() -> void:
-	lvl.load_room(4)
+	lvl.load_room(5)
 	await frames(60)
 	var room = lvl.room
 	check(room.title == "Counterweight Lift", "the Counterweight Lift room loads")

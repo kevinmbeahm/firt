@@ -7,7 +7,7 @@ extends SceneTree
 # Run:   godot --headless -s tests/solve_zipline.gd      (exit code 0 = pass)
 # Shots: godot -s tests/solve_zipline.gd -- --shots=/some/dir   (needs a display)
 
-const ROOM := 5
+const ROOM := 7
 
 var lvl
 var ok := true
