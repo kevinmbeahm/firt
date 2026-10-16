@@ -202,6 +202,15 @@ a difficulty rating from 1 to 5.
   pylon).
 - **Systems:** S1, S7. **Difficulty:** 2.
 
+- **As built (room 8):** as designed, with these choices. A crease hooks on
+  only when it's carried up to the cable (two beans, one at each end of the
+  crease) and lies along it; it then swings to hang below, and the carriers
+  are left hanging on, held by the ends of the crease. A flat fold works as
+  well as a V (like a towel over a line). The paper stays put on the cable
+  until someone hangs on, then slides down (about 4 m/s at most). Each metre
+  of crease holds 50 kg: the 10 m crease takes both beans, a corner fold of
+  about 2.7 m holds one and slips off under two. There's no pulling it back
+  uphill for a second trip yet.
 ---
 
 ### P3. "Shape of the Doorway"
@@ -251,6 +260,15 @@ a difficulty rating from 1 to 5.
   sequence you'll want to reverse.
 - **Systems:** none new (S2 optional for feedback). **Difficulty:** 2.
 
+- **As built (room 4):** a 12 x 12 sheet, a 1.2 x 3.4 m tunnel through a 6 m
+  thick wall, and a **sizer box** (the fit-box gate) in front of it: the
+  tunnel door opens once every corner of the paper is inside the box, so the
+  sheet must be folded to a 3 x 6 strip (in half three times). The beans
+  can't fit the tunnel; they go round by a narrow passage (too narrow for the
+  paper unless it's folded four times the same way, an allowed alternative)
+  and pull the strip out on the far side with sheet handling. Instead of a
+  ramp to a ledge, the far side asks you to unfold it (undo) and lay it over a
+  6.2 m square on the floor (a profile gate lying down).
 ---
 
 ### P5. "Paper Boat"
@@ -305,6 +323,13 @@ a difficulty rating from 1 to 5.
   them on the plate, which is hard to aim: a funnel-shaped fold at the bottom
   of the ramp could do it, a great emergent answer).
 - **Systems:** S3, S4, two-player carry. **Difficulty:** 3.
+- **As built (room 5):** the container is a **trough**, not a masu box or
+  tray: the sheet has two printed lines and you fold its two sides up, leaving
+  the ends open. Each bean holds an open end, so carrying it out of level rolls
+  apples out of the ends. The path down is a 4 m wide ramp. The scale tips its
+  load back up the hill after 30 s part-loaded. The basket isn't too heavy for
+  one bean to drag (sheets are light); the time limit is what makes the carry
+  worth it.
 
 ---
 
@@ -401,7 +426,7 @@ a difficulty rating from 1 to 5.
   up at the lip to stop them sliding (a "tray"), which is a nice
   intermediate answer.
 - **Systems:** S3, S4, S8. **Difficulty:** 3.
-- **As built (room 5):** redesigned around a **tipping ramp**. The plank rests
+- **As built (room 6):** redesigned around a **tipping ramp**. The plank rests
   with its near end on the ground and its far end at the ledge, so it is
   itself the way up, but it tips the moment a bean walks past the middle
   (it leans back onto its near end by itself when empty, so it can't be
@@ -447,6 +472,14 @@ a difficulty rating from 1 to 5.
   a ladder (a long folded strip) back down.
 - **Systems:** S3, S7 (hook on a crease), S8. **Difficulty:** 3.
 
+- **As built (room 7):** the hook is a 4 m bar on a lift (S8) in a shaft. It
+  rises while either of two plates is pressed: one in an alcove at the
+  bottom, one up on the ledge. Fold the sheet in half and carry it up to the
+  bar until the crease hooks on; one bean hangs on (by an end of the crease)
+  while the other stands on the bottom plate, and hops off onto the ledge at
+  the top. The first bean up then brings the lift back up for the other from
+  the top plate, instead of dropping a ladder. There's no seat: you ride by
+  hanging on. Solo, the weight block holds the bottom plate down.
 ---
 
 ### P14. "Kite Lookout"
@@ -532,12 +565,18 @@ with an earlier mechanic, then a "free" room with several valid solutions.
 | Rooms: one level made of puzzle rooms, with restart per room, checkpoints and room-local goals | built |
 | Solo character swap | built |
 | S1 printed creases | built |
-| S2 shape gates (profile mode; fit-box and footprint modes not yet) | built |
+| S2 shape gates (profile mode) | built |
 | P1 Ramp (room 1) | built |
-| P3 Doorway: square, house | built |
+| P3 Doorway: square, house (rooms 2, 3) | built |
 | S3 pressure plates (and a scale that tips its load back) | built |
 | S4 loose props: apples (balls), crates, the solo weight block | built |
 | Two-player carry (kinematic; solo by swapping) | built |
-| P6 Basket Run (room 4) | built (trough version) |
-| P11 Counterweight Lift (room 5) | built (tipping-ramp version) |
+| P6 Basket Run (room 5) | built (trough version) |
+| P11 Counterweight Lift (room 6) | built (tipping-ramp version) |
+| S7 cables and hook bars; hanging on | built |
+| S8 lift (plate-driven) | built (for P13) |
+| S2 fit-box mode | built |
+| P2 Zipline Delivery (room 8) | built |
+| P4 Tight Squeeze (room 4) | built (unfold-and-cover ending) |
+| P13 Paper Elevator (room 7) | built (hang-on version, two plates) |
 | Everything else | not started |

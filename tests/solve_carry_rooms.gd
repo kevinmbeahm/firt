@@ -156,6 +156,8 @@ func pick(pid: int, p: Prop) -> bool:
 		return false
 	Input.action_press("p%d_grab" % pid)
 	await frames(3)
+	if b.held_prop != p:
+		print("      couldn't pick it up: hover %s, holding %s, grabbing %s" % [b.hover, b.held_prop, b.grabbing])
 	return b.held_prop == p
 
 
@@ -263,16 +265,18 @@ func basket_run() -> void:
 	check(upright == 2, "the sheet is a trough: two upright sides (%d)" % upright)
 
 	# 2. Roll the apples in, from the far end to the near end.
-	var spots := [-9.5, -8.6, -7.7, -6.8, -5.9, -5.0]
+	# (Two rows, with room between them: an apple dropped onto the edge of
+	# another rolls off it.)
+	var spots := [Vector2(-9.0, -0.8), Vector2(-9.0, 0.8), Vector2(-7.2, -0.8), Vector2(-7.2, 0.8), Vector2(-5.4, -0.8), Vector2(-5.4, 0.8)]
 	var loaded := 0
 	for i in apples.size():
 		if not await pick(1, apples[i]):
 			continue
 		# Round the trough (not through its walls) to its open front end.
 		var side := 5.5 if bean(1).global_position.z >= 0.0 else -5.5
-		await route(1, [Vector2(bean(1).global_position.x, side), Vector2(-1.5, side), Vector2(-1.5, 0.0)])
-		await drop_via(1, Vector2(-2.6, 0.0), Vector2(spots[i] + 1.25, 0.0))
-		await walk(1, Vector2(-1.5, 0.0))
+		await route(1, [Vector2(bean(1).global_position.x, side), Vector2(-1.5, side), Vector2(-1.5, spots[i].y)])
+		await drop_via(1, Vector2(-2.6, spots[i].y), spots[i] + Vector2(1.25, 0.0))
+		await walk(1, Vector2(-1.5, spots[i].y))
 		if in_box(apples[i].global_position, Vector3(-10.5, y, -2), Vector3(-3.5, y + 1.0, 2)):
 			loaded += 1
 		else:
