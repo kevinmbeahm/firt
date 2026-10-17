@@ -90,8 +90,9 @@ recognising a named model.
 of the folded paper (cells 0.25 m, in the sheet's frame) from outside, below
 the waterline; the open cells the water can't reach are the dry volume, and
 buoyancy acts at their centre. That covers leaks, rims dipping under and
-tipping in one test. Flat paper adds a little raft lift. There's no water
-collecting inside a flooded hull.
+tipping in one test. Flat paper adds a little raft lift. By decision (see
+section 8), water never collects inside a flooded hull and there are no
+waves.
 
 To decide whether a folded sheet **holds water** (a boat floats, a basket
 carries pebbles):
@@ -576,6 +577,7 @@ with an earlier mechanic, then a "free" room with several valid solutions.
 | Undo scope | Unlimited. |
 | Two-player carry | Kinematic first (the sheet moves rigidly between the two holders' hands); springs later if it feels stiff. |
 | Soggy paper | No. |
+| Water detail | No waves, and water doesn't collect inside a hull: a flooded hull just loses its dry space and sinks. Currents are uniform per body of water. |
 | Tearing | No tearing mechanic (S10 and the old "Two From One" puzzle are cut). |
 | Single player | A weight prop (a block as heavy as a player) and swapping control between the two characters. An idle character keeps holding whatever it was holding and keeps its weight. No AI partner. |
 

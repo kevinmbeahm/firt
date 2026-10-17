@@ -18,6 +18,8 @@ func _initialize() -> void:
 	for a in OS.get_cmdline_user_args():
 		if a.begins_with("--shots="):
 			shots_dir = a.trim_prefix("--shots=")
+	if shots_dir != "":
+		RenderingServer.render_loop_enabled = false # (see snap())
 	lvl = load("res://scenes/main.tscn").instantiate()
 	root.add_child(lvl)
 	run.call_deferred()
@@ -29,10 +31,14 @@ func check(cond: bool, msg: String) -> void:
 		ok = false
 
 
+## Saves a screenshot. (Rendering is only switched on for these: drawn in
+## software on a machine without a GPU, every frame would cost ~150 ms.)
 func snap(name: String) -> void:
 	if shots_dir != "":
-		await frames(2)
+		RenderingServer.render_loop_enabled = true
+		await frames(3)
 		root.get_viewport().get_texture().get_image().save_png(shots_dir.path_join(name + ".png"))
+		RenderingServer.render_loop_enabled = false
 
 
 func frames(n: int) -> void:

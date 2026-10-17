@@ -72,6 +72,8 @@ The game is a series of puzzle rooms, one at a time; solving a room (both beans 
 ## Tests
 Run each with `godot --headless --fixed-fps 120 -s tests/<name>.gd` (exit code 0 = pass). `--fixed-fps 120` steps the physics exactly once per frame, which makes the bot runs deterministic; without it, how many physics steps fall between two input frames depends on how fast the machine is, and the longer bot runs can occasionally miss a step.
 
+The bot tests take `-- --shots=DIR` to save screenshots (needs a display; `xvfb-run` works). They keep rendering switched off except for the frames they photograph: without a GPU, each frame is drawn in software (about 150 ms here, against well under 1 ms of game logic), so drawing every frame turned a 30-second run into half an hour.
+
 - `godot --headless -s tests/fold_model.gd` folds a paper plane step by step and checks layer-selective folds, partial angles, crease reuse, tear refusal, and inside/outside reverse folds.
 - `godot --headless -s tests/fold_physics.gd` checks folds against the world and the rigid body: flat folds near the floor go over the top, flaps rest on the ground instead of passing through it, hanging flaps over the void, no paper through paper, buried corners, undo/turn needing room, no steering falling sheets, clean grab release, respawn orientation.
 - `godot --headless -s tests/unfold_game.gd` folds a strip over with real inputs, then walks the flap back sloppily and checks it unfolds along the old crease.
@@ -112,5 +114,5 @@ Run each with `godot --headless --fixed-fps 120 -s tests/<name>.gd` (exit code 0
 - The two-bean carry is kinematic: the sheet moves rigidly between the hands (it doesn't swing or sag), and only two beans can carry one sheet.
 - Local co-op only, shared camera.
 - Shape gates have the profile (outline) and fit-box modes; the design doc's "bridge two points with a walkable surface" footprint test isn't built.
-- Water is simple: no waves, no water collecting inside a flooded hull (it just loses its dry space), and the current is uniform. The hull is voxels a quarter metre across, so small boats read a little low in the water. A bean standing in a floating sheet stands on it by a ray rather than by physics contact (characters would otherwise pin the boat down).
+- Water is simple by design: no waves, no water collecting inside a flooded hull (it just loses its dry space), and the current is uniform. The hull is voxels a quarter metre across, so small boats read a little low in the water. A bean standing in a floating sheet stands on it by a ray rather than by physics contact (characters would otherwise pin the boat down).
 - Hanging is kinematic too: a hooked sheet swings to hang below its cable (it can't be pushed into a swing), and only creases of a carried sheet hook on (paper dropped onto a cable doesn't).
