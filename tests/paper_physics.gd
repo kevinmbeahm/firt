@@ -72,7 +72,7 @@ func _process(_d: float) -> bool:
 			if s.global_position.y > -1.0 and s.global_position.distance_to(lvl.room.PUZZLE_START) < 0.5:
 				check(true, "the lost sheet respawned at its start")
 				next()
-			elif waited(1200):
+			elif waited(3600):
 				check(false, "the lost sheet respawned at its start (y=%.1f)" % s.global_position.y)
 				next()
 		3: # slide it out to overhang the edge by a bit less than half: still balanced

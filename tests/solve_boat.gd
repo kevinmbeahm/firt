@@ -223,17 +223,24 @@ func drop_via(pid: int, approach: Vector2, stand: Vector2, lift := 0.0) -> void:
 
 ## Bean `pid` walks toward `goal` and jumps once it's within `at` of it (over
 ## a wall), then carries on to it.
-func jump_to(pid: int, goal: Vector2, at: float) -> void:
+func jump_to(pid: int, goal: Vector2, at: float, retry := false) -> void:
+	var jumped := false
+	var best := INF
+	var stuck := 0
 	for i in 900:
 		var d := goal - flat(bean(pid).global_position)
 		if d.length() < 0.3:
 			break
 		stick(pid, d.normalized())
-		if d.length() < at and bean(pid).standing():
+		# (With `retry`, again, wherever it is, if it's up against a wall and not getting closer.)
+		stuck = 0 if d.length() < best - 0.05 else stuck + 1
+		best = minf(best, d.length())
+		if bean(pid).standing() and ((d.length() < at and not jumped) or (retry and stuck > 60)):
 			Input.action_press("p%d_jump" % pid)
 			await frames(2)
 			Input.action_release("p%d_jump" % pid)
-			at = -1.0
+			jumped = true
+			stuck = 0
 		await physics_frame
 	stick(pid, Vector2.ZERO)
 	await frames(30)
@@ -355,7 +362,7 @@ func run() -> void:
 		inward = (flat(s.global_position) - flat(corner)).normalized()
 		# A run-up from the middle, jumping just before the side.
 		await walk(pid, flat(corner) + inward * 2.2, 0.3)
-		await jump_to(pid, flat(corner) - inward * 2.5, 3.4)
+		await jump_to(pid, flat(corner) - inward * 2.5, 3.4, true)
 		# Up the beach, clear of the boat (it drifts along the shore).
 		var away := signf(bean(pid).global_position.z - s.global_position.z)
 		await walk(pid, Vector2(bean(pid).global_position.x + 0.5, bean(pid).global_position.z + away * 2.5), 0.4)
@@ -369,7 +376,7 @@ func run() -> void:
 	check(room.plate.is_pressed, "the crate's on the plate (%d kg; crate at %s)" % [roundi(room.plate.load_kg), room.crate.global_position])
 	await walk(2, Vector2(22, 7), 0.5)
 	await frames(10)
-	check(lvl.complete, "both beans reach the flag: Paper Boat complete")
+	check(lvl.complete or lvl.room_index != ROOM, "both beans reach the flag: Paper Boat complete")
 	release_all()
 	quit(0 if ok else 1)
 

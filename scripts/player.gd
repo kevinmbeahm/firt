@@ -19,6 +19,9 @@ const FALL_DEATH_Y := -14.0
 const ARM_LEN := 0.75
 const MAX_ARM_STRETCH := 2.6
 const PROP_LIFT := Vector2(-1.0, 1.6) ## how far a carried prop can be lowered/raised
+const LIFT_KG := 25.0 ## the heaviest sheet you can pick up and throw
+const THROW_SPEED := 7.0 ## a throw adds this, forward, to your running speed
+const SHEET_LIFT := Vector2(0.0, 1.5) ## how far a held sheet can be raised above your head
 const HANG := 2.1 ## hanging on, your hands are this far above your feet
 const WADE_DEPTH := 0.6 ## beans can wade this deep, no deeper
 const HOP_SPEED := 4.0 ## letting go of a ride while pushing the stick hops you off that way
@@ -32,6 +35,7 @@ var grabbing := false ## holding a sheet: folding it, or carrying it with the ot
 var carrying := false ## ...carrying it (see PaperSheet.start_carry)
 var riding := false ## ...hanging on to it while it hangs on a cable (see PaperSheet.add_rider)
 var held_prop: Prop = null ## a prop carried in front of you
+var held_sheet: PaperSheet = null ## a light sheet held up over your head, to throw
 var controlled_by := 1 ## which player's controls drive this character: 1, 2, or 0 = idle (solo play)
 var _latched := false ## holding on for a player who just took over, until they press grab
 var hover = null ## {sheet, world, local, facet} of the reachable corner/edge, or null
@@ -260,6 +264,7 @@ func respawn() -> void:
 func release() -> void:
 	_latched = false
 	drop_prop()
+	drop_sheet()
 	if riding:
 		end_ride()
 	if carrying and is_instance_valid(_grab_sheet):
@@ -313,8 +318,12 @@ func _physics_process(delta: float) -> void:
 			s.push(wish * level.sheet_speed)
 			if _just("jump"):
 				s.flip(level.camera_basis().x)
-			elif _just("grab"):
+			elif _just("mode"):
 				s.turn(PI * 0.25)
+			elif _just("grab") and s.mass <= LIFT_KG and held_prop == null:
+				held_sheet = s # pick it up, over your head
+				_lift = 0.0
+				s.pick_up(self)
 		# Ride the sheet if you're on it, otherwise walk alongside as you push.
 		if s == null or _floor_body == s:
 			wish = Vector3.ZERO
@@ -331,6 +340,8 @@ func _physics_process(delta: float) -> void:
 
 	if held_prop != null:
 		_lift = clampf(_lift + _axis("lower", "jump") * LIFT_SPEED * delta, PROP_LIFT.x, PROP_LIFT.y)
+	elif held_sheet != null:
+		_lift = clampf(_lift + _axis("lower", "jump") * LIFT_SPEED * delta, SHEET_LIFT.x, SHEET_LIFT.y)
 	elif grabbing:
 		if _fold_mode == PaperModel.FOLD_COLLAPSE and not carrying:
 			# Collapses lie flat, so raise/lower step through the options instead.
@@ -349,7 +360,7 @@ func _physics_process(delta: float) -> void:
 
 	if is_on_floor():
 		velocity.y = maxf(velocity.y, 0.0)
-		if _just("jump") and not grabbing and held_prop == null and not handling_sheet:
+		if _just("jump") and not grabbing and held_prop == null and held_sheet == null and not handling_sheet:
 			velocity.y = JUMP_SPEED
 		else:
 			_step_up(Vector3(velocity.x, 0.0, velocity.z) * delta)
@@ -404,7 +415,7 @@ func _on_boat(delta: float, target: Vector3, handling_sheet: bool) -> bool:
 	velocity = Vector3(pv.x + _boat_rel.x, pv.y, pv.z + _boat_rel.z)
 	_floor_body = boat
 	boat.apply_force(Vector3.DOWN * WEIGHT, global_position - boat.global_position)
-	if _just("jump") and not grabbing and held_prop == null and not handling_sheet:
+	if _just("jump") and not grabbing and held_prop == null and held_sheet == null and not handling_sheet:
 		velocity.y = JUMP_SPEED
 		global_position.y += 0.05
 		_boat_jump = 0.5 # (until you're well clear of its floor)
@@ -515,6 +526,15 @@ func _hands_world() -> Vector3:
 
 
 func _update_grab(handling_sheet: bool) -> void:
+	if held_sheet != null:
+		if not is_instance_valid(held_sheet) or held_sheet.holder != self:
+			held_sheet = null
+		elif not _pressed("grab"):
+			throw_sheet()
+		elif _just("mode"):
+			# Rolls it a quarter turn; with sheet handling held, turns it end for end.
+			held_sheet.roll(PI * 0.5, Vector3.UP if handling_sheet else Vector3(0, 0, -1))
+		return
 	if held_prop != null:
 		if not is_instance_valid(held_prop) or held_prop.holder != self:
 			held_prop = null
@@ -653,6 +673,37 @@ func hold_point() -> Vector3:
 	return global_position + fwd * (0.75 + held_prop.size) + Vector3.UP * (1.1 + _lift)
 
 
+## (Holding a sheet up) where its centre is held: over your head, a little
+## in front, facing the way you face.
+func sheet_hold() -> Transform3D:
+	var b := Basis(Vector3.UP, _yaw)
+	return Transform3D(b, global_position + Vector3.UP * (2.4 + _lift) + b * Vector3(0, 0, -0.3))
+
+
+## Let go of a held sheet: it flies off at your running speed plus a flick
+## forward and up.
+func throw_sheet() -> void:
+	if held_sheet == null:
+		return
+	var fwd := Vector3(-sin(_yaw), 0.0, -cos(_yaw))
+	var v := Vector3(velocity.x, 0.0, velocity.z) + fwd * THROW_SPEED + Vector3.UP
+	var s := held_sheet
+	held_sheet = null
+	_lift = 0.0
+	if is_instance_valid(s):
+		s.throw(v)
+
+
+## Drop a held sheet where it is (respawns, restarts).
+func drop_sheet() -> void:
+	if held_sheet != null and is_instance_valid(held_sheet):
+		var s := held_sheet
+		held_sheet = null
+		s.throw(Vector3.ZERO)
+	held_sheet = null
+	_lift = 0.0
+
+
 func drop_prop() -> void:
 	if held_prop != null and is_instance_valid(held_prop):
 		held_prop.drop()
@@ -661,6 +712,8 @@ func drop_prop() -> void:
 
 
 func fold_status() -> String:
+	if held_sheet != null:
+		return "holding the sheet up (raise/lower it; fold type rolls it a quarter turn, or with sheet handling turns it round; let go of grab to throw it)"
 	if held_prop != null:
 		return "carrying a %d kg %s" % [roundi(held_prop.mass), ["ball", "crate", "weight block"][held_prop.kind]]
 	if riding:
@@ -694,6 +747,8 @@ func _process(delta: float) -> void:
 		look_dir.y = 0.0
 	elif held_prop != null:
 		reach_target = held_prop.global_position
+	elif held_sheet != null:
+		reach_target = sheet_hold().origin
 	elif hover != null:
 		reach_target = hover.world
 	if look_dir.length() > 0.15:

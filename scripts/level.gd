@@ -17,6 +17,7 @@ const ROOMS := [
 	preload("res://scripts/rooms/elevator.gd"),
 	preload("res://scripts/rooms/paper_boat.gd"),
 	preload("res://scripts/rooms/ferry.gd"),
+	preload("res://scripts/rooms/plane_post.gd"),
 	preload("res://scripts/rooms/zipline.gd"),
 ]
 const ADVANCE_DELAY := 3.0 ## seconds between solving a room and loading the next
@@ -335,7 +336,7 @@ func _update_camera(delta: float) -> void:
 
 func _update_hud() -> void:
 	var text := "P1: WASD move  Space jump  |  hold F/LMB on a glowing corner, walk to move it, Space/C or wheel raise/lower hands, Tab fold type, release to crease\n"
-	text += "      hold R/RMB: move = slide sheet, Space = flip it over, F/LMB = turn it\n"
+	text += "      hold R/RMB: move = slide sheet, Space = flip it over, Tab = turn it, F/LMB = pick it up to throw (if light)\n"
 	text += "P2: Arrows  / jump  . grab  ; lower  ' fold type  , sheet     Pads: A jump/raise  B lower  X grab  Y fold type  RB sheet\n"
 	text += "Solo: V / LB swaps which bean you control (the other keeps holding what it holds)\n"
 	text += "Mouse / right stick / Q E: camera   Z: undo fold   Backspace: restart room   PgUp/PgDn: change room   Esc: release mouse   F11: fullscreen\n"

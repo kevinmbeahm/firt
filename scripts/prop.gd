@@ -78,12 +78,15 @@ func _ready() -> void:
 
 func pick_up(by) -> void:
 	holder = by
+	add_collision_exception_with(by) # (swinging round as you turn, it'd knock into you)
 	gravity_scale = 0.0
 	can_sleep = false # (a sleeping body would never follow the hands)
 	sleeping = false
 
 
 func drop() -> void:
+	if is_instance_valid(holder):
+		remove_collision_exception_with(holder)
 	holder = null
 	gravity_scale = 1.0
 	# Let it fall before it may sleep again: held still in the hands, it'd

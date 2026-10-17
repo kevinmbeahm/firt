@@ -35,6 +35,12 @@ const WATER_HEAVE_DAMP := 30.0 ## ...up and down
 const WATER_SPIN_DAMP := 20.0
 const PADDLE_SPEED := 0.5 ## share of the slide speed you paddle a floating sheet at
 const PADDLE_ACCEL := 2.0
+const AIR_DENSITY := 1.2 ## kg per cubic metre
+const AIR_PUSH := 1.2 ## drag coefficient of a flat plate, face on
+const AIR_LIFT_SLOPE := 3.0 ## ...and how fast it grows with the sine of a shallow angle
+const AIR_SKIN := 0.02 ## skin friction coefficient along it
+const AIR_CP_SHIFT := 0.04 ## how far ahead of a facet's centre the air pushes, as a share of its chord, skimming
+const AIR_SPIN_DAMP := 30.0 ## N m s per square metre: the air resisting paper turning
 const CONTACT_SLOP := 0.02 ## overlaps shallower than this (a loaded sheet settling) don't block folds
 
 var paper_size := Vector2(18, 12)
@@ -65,6 +71,9 @@ var _swing := 0.0 ## how far it has swung about the cable from there, radians
 var _swing_v := 0.0
 var _swing_hang := 0.0 ## the swing at which its centre of mass is right below the cable
 var _swing_r := 1.0 ## how far its centre of mass is from the cable
+var holder = null ## a bean holding it up to throw it, if any
+var _held_rel := Transform3D.IDENTITY ## (held) where it sits relative to the hands
+var _aero_share: Array = [] ## per facet: the share of its area the air sees (stacked layers count once)
 var water: Water = null ## the water it's floating in, if any
 var dry_volume := 0.0 ## the dry space its hull keeps under the waterline, m^3
 var _hull: Hull = null
@@ -142,6 +151,8 @@ func setup(size: Vector2, printed: Array = []) -> void:
 
 
 func reset_paper() -> void:
+	if holder != null:
+		holder.drop_sheet()
 	if hook_cable != null:
 		unhook()
 	if not carriers.is_empty():
@@ -155,7 +166,7 @@ func reset_paper() -> void:
 
 
 func is_busy() -> bool:
-	return fold_owner != null or not carriers.is_empty() or hook_cable != null or _tween_t < 1.0
+	return fold_owner != null or not carriers.is_empty() or hook_cable != null or holder != null or _tween_t < 1.0
 
 
 # --- Carrying ------------------------------------------------------------------
@@ -488,13 +499,142 @@ func hook_status() -> String:
 
 ## Back to where it started, with its folds (lost in the void, over a waterfall).
 func respawn() -> void:
+	if holder != null:
+		holder.drop_sheet()
 	if hook_cable != null:
 		unhook()
 	if not carriers.is_empty():
 		end_carry()
 	if fold_owner != null:
 		cancel_fold()
+	if freeze:
+		global_transform = _spawn_place() # (a frozen body isn't integrated: do it now)
+		return
 	_respawn = true
+	sleeping = false
+
+
+## Where it goes back to: its start, lifted clear of the floor if, folded,
+## part of it would reach below where it lay flat.
+func _spawn_place() -> Transform3D:
+	var low := 0.0
+	for p in _all_points():
+		low = minf(low, (spawn_transform.basis * p).y)
+	return spawn_transform.translated(Vector3.UP * (0.02 - low if low < 0.0 else 0.0))
+
+
+# --- Air (S6) and throwing ------------------------------------------------------
+# Every facet feels the air moving past it, pushing along its normal (a flat
+# plate: lift at an angle, drag face on). Still air makes a sheet flutter down
+# and lets a paper plane glide; a Wind box moves the air itself. Stacked layers
+# count once, so a plane's nose is heavier than it is broad, which is what
+# keeps it flying nose first.
+
+func _update_air() -> void:
+	if freeze or _aero_share.size() != facets.size():
+		return
+	var wind := Wind.at(get_tree(), global_position)
+	var area := 0.0
+	for a in _aero_share:
+		area += a
+	apply_torque(-angular_velocity * AIR_SPIN_DAMP * area) # (paper turning sweeps a lot of air)
+	var com := global_position + global_basis * center_of_mass # (what it turns about)
+	for i in facets.size():
+		var f: PaperModel.Facet = facets[i]
+		var off: Vector3 = _offsets[i] if i < _offsets.size() else Vector3.ZERO
+		var c := to_global(f.at(PaperGeometry.centroid(f.pts)) + off)
+		var n := (global_basis * f.normal()).normalized()
+		var flow := wind - (linear_velocity + angular_velocity.cross(c - com))
+		var speed := flow.length()
+		if speed < 0.01:
+			continue
+		var q: float = 0.5 * AIR_DENSITY * speed * speed * _aero_share[i]
+		# A thin plate: the push across it rises steeply with the angle the air
+		# meets it at (that's lift), levelling off face on; plus a little skin
+		# friction along it.
+		var s := flow.dot(n) / speed
+		var cn := signf(s) * minf(AIR_LIFT_SLOPE * absf(s), AIR_PUSH)
+		var along := flow - n * flow.dot(n)
+		# Where it pushes: a little ahead of its centre (of area), toward the
+		# leading edge, when the air skims it, moving back to the centre as it
+		# meets it face on.
+		# (That's why loose paper flutters, and a plane needs its nose heavy.)
+		var at := c
+		if along.length() > 0.01 * speed:
+			var dir := along.normalized()
+			var lo := INF
+			var hi := -INF
+			for p in f.pts:
+				var k := (to_global(f.at(p) + off) - c).dot(dir)
+				lo = minf(lo, k)
+				hi = maxf(hi, k)
+			at = c - dir * ((hi - lo) * AIR_CP_SHIFT * along.length() / speed)
+		apply_force(n * (q * cn) + along * (q * AIR_SKIN / speed), at - global_position)
+
+
+## Per facet, its area divided among the layers stacked with it.
+func _air_shares() -> Array:
+	var out := []
+	for i in facets.size():
+		var f: PaperModel.Facet = facets[i]
+		var c := f.at(PaperGeometry.centroid(f.pts))
+		var stacked := 1
+		for j in facets.size():
+			if j == i:
+				continue
+			var g: PaperModel.Facet = facets[j]
+			if absf(absf(g.normal().dot(f.normal())) - 1.0) > 1e-3:
+				continue
+			var q := g.xf.affine_inverse() * c
+			if absf(q.z) < 0.2 and Geometry2D.is_point_in_polygon(Vector2(q.x, q.y), g.pts):
+				stacked += 1
+		out.append(absf(PaperGeometry.signed_area(f.pts)) / stacked)
+	return out
+
+
+## A bean picks it up to throw it: it's held with its centre of mass at the
+## hands, squared up to the way the bean faces (its sides along the bean's
+## sides, the nearest way round to how it lay).
+func pick_up(by) -> void:
+	holder = by
+	freeze_mode = RigidBody3D.FREEZE_MODE_KINEMATIC
+	freeze = true
+	_held_still = true
+	var b: Basis = (by.sheet_hold().affine_inverse() * global_transform).basis.orthonormalized()
+	var x := _square(b.x, -1)
+	var y := _square(b.y, _axis_of(x))
+	_held_rel = Transform3D(Basis(x, y, x.cross(y)), Vector3.ZERO)
+	_held_rel.origin = -(_held_rel.basis * center_of_mass)
+
+
+## (Held) turns it a quarter turn about `axis` of the bean's hands (forward:
+## roll it; up: turn it end for end).
+func roll(angle: float, axis := Vector3(0, 0, -1)) -> void:
+	_held_rel = Transform3D(Basis(axis, angle), Vector3.ZERO) * _held_rel
+	_held_rel.origin = -(_held_rel.basis * center_of_mass)
+
+
+## The axis direction (±X, ±Y or ±Z) nearest to `v`, other than along `skip`.
+func _square(v: Vector3, skip: int) -> Vector3:
+	var best := -1
+	for k in 3:
+		if k != skip and (best < 0 or absf(v[k]) > absf(v[best])):
+			best = k
+	var out := Vector3.ZERO
+	out[best] = signf(v[best]) if v[best] != 0.0 else 1.0
+	return out
+
+
+func _axis_of(v: Vector3) -> int:
+	return 0 if v.x != 0.0 else (1 if v.y != 0.0 else 2)
+
+
+## Let go of, moving at `v`.
+func throw(v: Vector3) -> void:
+	holder = null
+	_let_go()
+	linear_velocity = v
+	angular_velocity = Vector3.ZERO
 	sleeping = false
 
 
@@ -846,7 +986,11 @@ func _rotate_about_center(rot: Basis) -> void:
 
 
 func _physics_process(delta: float) -> void:
+	if holder != null:
+		global_transform = holder.sheet_hold() * _held_rel
+		return
 	_update_water(delta)
+	_update_air()
 	if hook_cable != null:
 		_update_hook(delta)
 	elif carriers.size() == 2:
@@ -873,7 +1017,7 @@ func _physics_process(delta: float) -> void:
 func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 	if _respawn:
 		_respawn = false
-		state.transform = spawn_transform
+		state.transform = _spawn_place()
 		state.linear_velocity = Vector3.ZERO
 		state.angular_velocity = Vector3.ZERO
 		return
@@ -978,6 +1122,7 @@ func _refresh() -> void:
 	_crease.visible = false
 	sleeping = false
 	_hull = null
+	_aero_share = _air_shares()
 
 
 ## Mass from paper area; centre of mass from where the paper actually is now,

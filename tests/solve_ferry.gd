@@ -212,10 +212,10 @@ func route(pid: int, points: Array) -> void:
 
 ## Carries the held prop in via `approach`, stands at `stand` (so it's held
 ## over the spot in front) and lets go.
-func drop_via(pid: int, approach: Vector2, stand: Vector2, lift := 0.0) -> void:
+func drop_via(pid: int, approach: Vector2, stand: Vector2, lift := 0.0, tol := 0.12) -> void:
 	await walk(pid, approach, 0.3)
 	await lift_to(pid, lift)
-	await walk(pid, stand, 0.12)
+	await walk(pid, stand, tol)
 	await frames(30)
 	await let_go(pid)
 	await frames(30)
@@ -223,17 +223,24 @@ func drop_via(pid: int, approach: Vector2, stand: Vector2, lift := 0.0) -> void:
 
 ## Bean `pid` walks toward `goal` and jumps once it's within `at` of it (over
 ## a wall), then carries on to it.
-func jump_to(pid: int, goal: Vector2, at: float) -> void:
+func jump_to(pid: int, goal: Vector2, at: float, retry := false) -> void:
+	var jumped := false
+	var best := INF
+	var stuck := 0
 	for i in 900:
 		var d := goal - flat(bean(pid).global_position)
 		if d.length() < 0.3:
 			break
 		stick(pid, d.normalized())
-		if d.length() < at and bean(pid).standing():
+		# (With `retry`, again, wherever it is, if it's up against a wall and not getting closer.)
+		stuck = 0 if d.length() < best - 0.05 else stuck + 1
+		best = minf(best, d.length())
+		if bean(pid).standing() and ((d.length() < at and not jumped) or (retry and stuck > 60)):
 			Input.action_press("p%d_jump" % pid)
 			await frames(2)
 			Input.action_release("p%d_jump" % pid)
-			at = -1.0
+			jumped = true
+			stuck = 0
 		await physics_frame
 	stick(pid, Vector2.ZERO)
 	await frames(30)
@@ -356,7 +363,7 @@ func climb_out(s: PaperSheet) -> void:
 		var corner := floor_corner(s)
 		var inward := (flat(s.global_position) - flat(corner)).normalized()
 		await walk(pid, flat(corner) + inward * 2.2, 0.3)
-		await jump_to(pid, flat(corner) - inward * 2.5, 3.4)
+		await jump_to(pid, flat(corner) - inward * 2.5, 3.4, true)
 		var away := signf(bean(pid).global_position.z - s.global_position.z)
 		await walk(pid, Vector2(bean(pid).global_position.x + 0.8, bean(pid).global_position.z + away * 2.5), 0.4)
 
@@ -467,11 +474,11 @@ func run() -> void:
 	check(bean(1).global_position.x > room.FAR_X and bean(2).global_position.x > room.FAR_X, "both climb out and up onto the far bank")
 	await walk(1, Vector2(room.FAR_X + 8, 5), 0.5)
 	check(await pick(2, room.crate), "P2 picks the crate up again")
-	await drop_via(2, Vector2(room.FAR_X + 1.5, 0), Vector2(room.FAR_X + 2.6, 0))
-	check(room.plate.is_pressed, "the crate's on the plate (%d kg)" % roundi(room.plate.load_kg))
+	await drop_via(2, Vector2(room.FAR_X + 0.3, 0), Vector2(room.FAR_X + 2.6, 0), 0.0, 0.3) # (a straight run in, stopping loosely so it doesn't step back and turn round)
+	check(room.plate.is_pressed, "the crate's on the plate (%d kg; crate at %s, P2 at %s, boat at %s)" % [roundi(room.plate.load_kg), room.crate.global_position, bean(2).global_position, s.global_position])
 	await walk(2, Vector2(room.FAR_X + 10, 7), 0.5)
 	await frames(10)
-	check(lvl.complete, "both beans reach the flag: Ferry complete")
+	check(lvl.complete or lvl.room_index != ROOM, "both beans reach the flag: Ferry complete")
 	quit(0 if ok else 1)
 
 

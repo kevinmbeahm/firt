@@ -210,7 +210,7 @@ a difficulty rating from 1 to 5.
   pylon).
 - **Systems:** S1, S7. **Difficulty:** 2.
 
-- **As built (room 10):** as designed, with these choices. A crease hooks on
+- **As built (room 11):** as designed, with these choices. A crease hooks on
   only when it's carried up to the cable (two beans, one at each end of the
   crease) and lies along it; it then swings to hang below, and the carriers
   are left hanging on, held by the ends of the crease. A flat fold works as
@@ -392,6 +392,22 @@ a difficulty rating from 1 to 5.
   stable but works with the right fan speed. Any shape with enough lift and
   stability is accepted; the target is only hit-based.
 - **Systems:** S1, S6, S8, throw action. **Difficulty:** 3.
+- **As built (room 10):** the fan is an **updraft** rising out of the canyon
+  (24 m wide), not a wind blowing across it: in the air model a tailwind
+  makes a thrown plane *lose* airspeed, and a flat sheet, which stays up
+  longest, drifts furthest on it, so a tailwind favoured the wrong shape. In
+  rising air a plane glides across while a flat sheet just hangs and a block
+  drops. Three plates pick the updraft (1, 2 or 3 m/s); thrown from hand
+  height, the plane reaches the board 2 m below ground level, 2.4 m up (the
+  ring) or 6.8 m up (over the 5.6 m board). Hitting the ring slides a bridge
+  out; a hit counts only while the paper is still flying in. The throw is a
+  pick-up: a sheet of up to 25 kg (the 4 x 6 is 14.4 kg) is held over your
+  head, squared up to the way you face, raised up to 1.5 m more, rolled a
+  quarter turn at a time or turned end for end, and thrown at your running
+  speed plus 7 m/s forward and 1 m/s up. Paper out over the canyon or on the
+  far side is blown back to its start after 10 s, keeping its folds. The
+  co-op split is as designed (one throws, one sets the updraft); solo, the
+  weight block holds a plate.
 
 ---
 
@@ -409,6 +425,11 @@ a difficulty rating from 1 to 5.
 - **Co-op:** one stands on the sail's foot and turns it at each tack; the
   other balances the boat.
 - **Systems:** S5, S6 (normal-based force). **Difficulty:** 4.
+- **Not built yet:** tacking needs the boat to resist sliding sideways (a
+  keel, or lateral drag in the water much higher than drag along the hull),
+  which the water model doesn't have; and a sail stood up on a partial fold
+  pinned under a bean needs paper that stays partly folded while you stand on
+  it. The wind half (normal-based force on the sail) is there.
 
 ---
 
@@ -521,6 +542,8 @@ a difficulty rating from 1 to 5.
 - **Alternate:** a paper plane on the tether also flies, but it's unstable;
   allowed.
 - **Systems:** S1, S6, S7 (tether). **Difficulty:** 4.
+- **Not built yet:** it needs S7's tether mode (a line from the floor to a
+  point on the sheet that a bean lets out). The updraft (S6) is built.
 
 ---
 
@@ -599,11 +622,16 @@ with an earlier mechanic, then a "free" room with several valid solutions.
 | S7 cables and hook bars; hanging on | built |
 | S8 lift (plate-driven) | built (for P13) |
 | S2 fit-box mode | built |
-| P2 Zipline Delivery (room 10) | built |
+| P2 Zipline Delivery (room 11) | built |
 | P4 Tight Squeeze (room 4) | built (unfold-and-cover ending) |
 | P13 Paper Elevator (room 7) | built (hang-on version, two plates) |
 | Gusset corners (a tray from single folds) | built |
 | S5 water: hull buoyancy (voxel flood), rafts, currents, waterfalls, paddling, wading | built |
 | P5 Paper Boat (room 8) | built (tray hull) |
 | P7 Ferry Across the Flood (room 9) | built (portage version) |
+| S6 air and wind: per-facet flat-plate air forces, Wind boxes (fans, updrafts) | built |
+| Pick up and throw a light sheet | built |
+| P8 Paper Plane Post (room 10) | built (updraft version) |
+| P9 Sail Away | not started (needs lateral resistance in water) |
+| P14 Kite Lookout, S7 tether mode | not started |
 | Everything else | not started |
