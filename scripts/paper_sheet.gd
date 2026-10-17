@@ -22,9 +22,12 @@ const CARRY_MAX_SPEED := 4.0 ## m/s: how fast a carried sheet follows the hands
 const CARRY_MAX_RISE := 1.0 ## m/s: ...rises or drops
 const CARRY_MAX_TURN := 1.2 ## rad/s: ...and turns
 const CARRY_STRETCH := 1.5 ## carriers' hands this much further apart (or closer) than their grips and it slips
-const HOOK_TOL := 0.35 ## a crease this close to a cable along HOOK_MIN of its length hooks onto it
+const HOOK_REACH := 0.6 ## a crease over a cable (this close to it, seen from above)...
+const HOOK_BELOW := 0.35 ## ...from this far below it...
+const HOOK_ABOVE := 2.5 ## ...to this far above it, along HOOK_MIN of its length, hooks on (lowered onto it, or lifted up into it)
 const HOOK_MIN := 1.0
-const HOOK_ANGLE := deg_to_rad(15.0) ## ...and running this close to parallel with it
+const HOOK_ANGLE := deg_to_rad(20.0) ## ...running this close to parallel with it
+const HOOK_HINT := 4.0 ## carrying a crease this near a cable, the HUD says where it is
 const HOOK_KG_PER_M := 50.0 ## what each metre of crease on the cable holds
 const RIDER_KG := 70.0
 const HOOK_DRAG := 0.08 ## rope friction and air: slows a sliding sheet (v squared)
@@ -204,6 +207,7 @@ func start_carry(b, b_local: Vector3) -> void:
 
 ## Both carriers let go; the sheet (and whatever's in it) drops from where it is.
 func end_carry() -> void:
+	hook_note = "" # (no more hints about where the crease is)
 	var was: Array = carriers
 	carriers = []
 	_carry_local = []
@@ -297,9 +301,11 @@ func _carry_riders(from: Transform3D, to: Transform3D) -> void:
 
 
 # --- Hanging on a cable (S7) -------------------------------------------------
-# Carry a sheet up to a cable with a crease lying along it and it hooks on: it
-# swings to hang below the cable and the carriers find themselves hanging on to
-# it. Once someone hangs on it slides downhill; on its own, friction holds it.
+# Carry a sheet up to a cable with a crease lying along it and it hooks on:
+# lift the crease up into the cable from below or lower it onto it from above
+# (no need to match the cable's height, just get the crease over it and up to
+# it). It swings to hang below the cable and the carriers find themselves
+# hanging on to it. Once someone hangs on it slides downhill; on its own, friction holds it.
 # Each metre of crease on the cable holds HOOK_KG_PER_M: overload a short hook
 # and it slips off.
 
@@ -325,26 +331,46 @@ func crease_segments() -> Array:
 	return out
 
 
-## A crease lying along a cable now: {cable, a, b, len}, or {}.
+## A crease lying along a cable now: {cable, a, b, len}, or {}. (Carrying
+## one near a cable but not on it sets hook_note to say where it is.)
 func _find_hook() -> Dictionary:
 	var cables := get_tree().get_nodes_in_group("cables")
 	if cables.is_empty():
 		return {}
+	var hint := ""
+	var hint_d := HOOK_HINT
 	for seg in crease_segments():
 		var p0 := to_global(seg[0])
 		var p1 := to_global(seg[1])
 		var d := p1 - p0
-		var n := int(ceil(d.length() / 0.1))
 		if d.length() < HOOK_MIN:
 			continue
+		var n := int(ceil(d.length() / 0.1))
 		for c in cables:
 			var cable: Cable = c
+			var mid := (p0 + p1) * 0.5
+			var off := mid - cable.point(cable.along(mid))
+			var side := Vector2(off.x, off.z).length()
+			if side < hint_d and absf(off.y) < HOOK_HINT:
+				hint_d = side
+				if absf(d.normalized().dot(cable.dir())) < cos(HOOK_ANGLE):
+					hint = "Turn the crease to run along the cable."
+				elif side > HOOK_REACH:
+					hint = "The crease is %.1f m to the side of the cable." % side
+				elif off.y < -HOOK_BELOW:
+					hint = "Raise the crease: it's %.1f m below the cable." % -off.y
+				elif off.y > HOOK_ABOVE:
+					hint = "Lower the crease: it's %.1f m above the cable." % off.y
+				else:
+					hint = "Get more of the crease along the cable."
 			if absf(d.normalized().dot(cable.dir())) < cos(HOOK_ANGLE):
 				continue
 			var run := 0.0
 			var best := 0.0
 			for k in n + 1:
-				if cable.distance_to(p0 + d * (float(k) / n)) < HOOK_TOL:
+				var p := p0 + d * (float(k) / n)
+				var q := p - cable.point(cable.along(p))
+				if Vector2(q.x, q.z).length() < HOOK_REACH and q.y > -HOOK_BELOW and q.y < HOOK_ABOVE:
 					run += d.length() / n
 					best = maxf(best, run)
 				else:
@@ -355,6 +381,7 @@ func _find_hook() -> Dictionary:
 			var overlap := absf(cable.along(p1) - cable.along(p0))
 			if best >= HOOK_MIN and overlap >= full - 0.5:
 				return {"cable": cable, "a": seg[0], "b": seg[1], "len": full}
+	hook_note = hint
 	return {}
 
 
@@ -718,6 +745,7 @@ func water_status() -> String:
 func _ready() -> void:
 	add_to_group("sheets")
 	spawn_transform = global_transform
+	set_collision_mask_value(Cable.PAPER_LAYER, true) # (loose paper lands on cables)
 
 
 ## Slide the sheet: called every physics frame a player holds the sheet control.
@@ -922,7 +950,7 @@ func _hits_world(plan: Dictionary, s: float, pose: Transform3D) -> bool:
 	for p in get_tree().get_nodes_in_group("players") + get_tree().get_nodes_in_group("props"):
 		exclude.append((p as CollisionObject3D).get_rid())
 	query.exclude = exclude
-	query.collision_mask = collision_mask
+	query.collision_mask = 1 # (the world: a fold may swing past a cable)
 	query.transform = pose
 	var back := Transform3D.IDENTITY
 	if plan.swept and s < 1.0:

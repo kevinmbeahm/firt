@@ -7,6 +7,7 @@ extends Node3D
 ## and what hangs on it.
 
 const RADIUS := 0.05
+const PAPER_LAYER := 2 ## the cable's collision layer: paper collides with it, beans and props don't
 
 var _b := Vector3.ZERO ## the far end, in this node's space (the near end is its origin)
 
@@ -31,6 +32,20 @@ func setup(from: Vector3, to: Vector3, color := Color(0.85, 0.8, 0.65)) -> void:
 	var x := y.cross(Vector3.FORWARD if absf(y.dot(Vector3.FORWARD)) < 0.9 else Vector3.RIGHT).normalized()
 	mi.transform = Transform3D(Basis(x, y, x.cross(y)), _b * 0.5)
 	add_child(mi)
+	# Something solid for loose paper to land on (a little fatter than it
+	# looks, so thin paper falling onto it doesn't slip through).
+	var body := StaticBody3D.new()
+	body.collision_layer = 0
+	body.collision_mask = 0
+	body.set_collision_layer_value(PAPER_LAYER, true)
+	var cs := CollisionShape3D.new()
+	var cap := CapsuleShape3D.new()
+	cap.radius = 0.1
+	cap.height = _b.length() + 0.2
+	cs.shape = cap
+	cs.transform = mi.transform
+	body.add_child(cs)
+	add_child(body)
 
 
 func _ready() -> void:

@@ -1,6 +1,7 @@
 extends SceneTree
 # Bots ride the Zipline with real input actions: fold the sheet in half on its
-# printed line, carry it up to the cable together until the crease hooks on,
+# printed line, carry it up to the cable together (hands all the way up) until
+# the crease hooks on (with a hint on the way),
 # ride it down hanging on, let go over the island and walk to the flag. Then a
 # rule check: a short hook (a corner folded over) holds one bean but slips off
 # under two.
@@ -153,17 +154,26 @@ func run() -> void:
 	check(await grab_sheet(1, Vector3(-17.9, 0.1, 5), Vector3(-17, 0, 5)), "P1 takes the uphill end of the crease")
 	check(await grab_sheet(2, Vector3(-6.1, 0.1, 5), Vector3(-7, 0, 5)), "P2 takes the downhill end")
 	check(s.carriers.size() == 2, "they're carrying it together")
-	await lift_to(1, cable_y(-17) - 0.1)
-	await lift_to(2, cable_y(-7) - 0.1)
-	# 3. Walk it in under the cable until the crease hooks on.
+	# 3. Both raise their hands as high as they go (no need to match the
+	# cable's height) and walk the crease over to the cable until it hooks on.
+	Input.action_press("p1_jump")
+	Input.action_press("p2_jump")
+	await frames(300)
+	Input.action_release("p1_jump")
+	Input.action_release("p2_jump")
+	check(bean(1)._lift > 3.0 and bean(2)._lift > 3.0, "both raise their hands all the way")
+	var hinted := ""
 	for i in 600:
 		if s.is_hooked():
 			break
+		if s.hook_note != "":
+			hinted = s.hook_note
 		stick(1, Vector2(0, -0.5))
 		stick(2, Vector2(0, -0.5))
 		await physics_frame
 	stick(1, Vector2.ZERO)
 	stick(2, Vector2.ZERO)
+	check(hinted.contains("side of the cable"), "on the way, the HUD says where the crease is (\"%s\")" % hinted)
 	check(s.is_hooked(), "the crease hooks onto the cable (%s)" % s.hook_status())
 	check(bean(1).riding and bean(2).riding, "and both beans are hanging on to it")
 	check(s.hook_len > 8.0, "the whole 10 m crease is on the cable (%.1f m)" % s.hook_len)
@@ -198,6 +208,19 @@ func run() -> void:
 	await frames(10)
 	check(lvl.complete, "both beans reach the flag: Zipline complete")
 	release_all()
+
+	# The cable is solid to paper: a sheet dropped onto it lands on it.
+	lvl.load_room(ROOM)
+	await frames(40)
+	s = lvl.sheet
+	s.global_transform = Transform3D(Basis(), Vector3(-12, cable_y(-12) + 1.0, 0))
+	s.linear_velocity = Vector3.ZERO
+	s.sleeping = false
+	var low := INF
+	for i in 120:
+		await physics_frame
+		low = minf(low, s.global_position.y)
+	check(low > cable_y(-12) - 0.3, "a sheet dropped onto the cable lands on it (it got down to %.2f m; the cable's at %.2f m)" % [low, cable_y(-12)])
 
 	# A short hook: a corner folded over the cable holds one bean, not two.
 	lvl.load_room(ROOM)

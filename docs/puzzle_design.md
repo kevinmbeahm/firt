@@ -212,13 +212,18 @@ a difficulty rating from 1 to 5.
 
 - **As built (room 11):** as designed, with these choices. A crease hooks on
   only when it's carried up to the cable (two beans, one at each end of the
-  crease) and lies along it; it then swings to hang below, and the carriers
+  crease) and lies along it, anywhere from just below the cable to 2.5 m
+  above it (playtesting: matching a sloping cable's height at both ends was
+  impossible by eye, so raising your hands all the way and walking the crease
+  over the cable now works, and the HUD says where the crease is); it then
+  swings to hang below, and the carriers
   are left hanging on, held by the ends of the crease. A flat fold works as
   well as a V (like a towel over a line). The paper stays put on the cable
   until someone hangs on, then slides down (about 4 m/s at most). Each metre
   of crease holds 50 kg: the 10 m crease takes both beans, a corner fold of
   about 2.7 m holds one and slips off under two. There's no pulling it back
-  uphill for a second trip yet.
+  uphill for a second trip yet. Cables are solid to paper (not to beans):
+  loose paper lands on one but doesn't hook.
 ---
 
 ### P3. "Shape of the Doorway"

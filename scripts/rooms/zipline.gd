@@ -1,8 +1,9 @@
 extends Room
 ## P2 "Zipline Delivery": a cable runs down from the cliff to an island 16 m
 ## across the void. Fold the sheet in half along its printed line, then carry
-## it up to the cable together, each holding one end of the crease, until the
-## crease lies along the cable: it hooks on, and you're both hanging from it.
+## it together, each holding one end of the crease, hands raised, until the
+## crease is over the cable and up to it: it hooks on, and you're both
+## hanging from it.
 ## Ride it down and let go over the island. Each metre of crease on the cable
 ## holds 50 kg: a little corner folded over it won't take two beans.
 
@@ -13,7 +14,7 @@ const ISLAND_Y := -6.0
 
 func build() -> void:
 	title = "Zipline Delivery"
-	hint = "Fold the sheet in half on its line, carry it up to the cable together (one of you at each end of the crease) until the crease lies along the cable, then hang on and ride it down. Let go over the island."
+	hint = "Fold the sheet in half on its line. Each grab an end of the crease (one grabs, then the other) to carry it together, raise your hands all the way and walk the crease over to the cable: it hooks on and you're hanging from it. Ride it down and let go over the island."
 	spawns = [Vector3(-20, 0.1, 6), Vector3(-20, 0.1, 9)]
 	cam_yaw = -PI * 0.5 # looking toward +X, down the cable
 	add_block(Vector3(-15, -2, 1), Vector3(22, 4, 22), Color(0.55, 0.6, 0.5)) # cliff, x -26..-4
